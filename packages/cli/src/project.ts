@@ -37,6 +37,16 @@ export interface BuildConfig {
   sharedLibraries?: Partial<Record<'vue' | 'react' | 'react-dom', string>>
   webDist?: Record<string, string>
 }
+
+function entryFunctionName(id: string, suffix: 'Logic' | 'Surface' | 'Module'): string {
+  const words = id.split(/[^a-zA-Z0-9]+/).filter(Boolean)
+  const name = words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('')
+  const base = name || 'Plugin'
+  return base.startsWith(suffix) || base.endsWith(suffix) ? base : base + suffix
+}
+
 export async function writeAtomic(
   path: string,
   data: string | Uint8Array,
@@ -135,6 +145,11 @@ export async function buildProject(
   const checker = program.getTypeChecker()
   const chunks = new Map<string, string>()
   const devModules: Record<string, string> = {}
+  const surfaceEntries = new Set(
+    (config.manifest.modules.surfaces ?? [])
+      .filter((surface) => surface.kind === 'web')
+      .map((surface) => surface.entry),
+  )
   const plugins = [hostModulesPlugin(), vuePlugin(root, config.framework), stylesheetPlugin()]
   const defines = {
     'process.env.NODE_ENV': '"production"',
@@ -192,11 +207,23 @@ export async function buildProject(
     if (result.outputFiles.length !== 1) throw new Error('Entry emitted sidecar files: ' + id)
     for (const info of Object.values(result.metafile.outputs))
       if (info.imports.length) throw new Error('Unbundled import in ' + id)
-    const source = result.outputFiles[0].text
+    const source = result.outputFiles[0].text.replace(
+      /(^|\n)var __ceru_entry =/,
+      '$1const __ceru_entry =',
+    )
     assertBundledDependencies(source)
     chunks.set(
       id,
-      'async function(ctx) {\n' +
+      'async function ' +
+        entryFunctionName(
+          id,
+          id === config.manifest.modules.logic?.entry
+            ? 'Logic'
+            : surfaceEntries.has(id)
+              ? 'Surface'
+              : 'Module',
+        ) +
+        '(ctx) {\n' +
         source +
         '\nif (typeof __ceru_entry.default !== "function") throw new Error("Entry must default-export a function");\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -254,11 +281,15 @@ export async function buildProject(
     }
     const result = await build(base)
     if (result.outputFiles.length !== 1) throw new Error('webDist emitted an external file')
-    assertBundledDependencies(result.outputFiles[0].text)
+    const source = result.outputFiles[0].text.replace(
+      /(^|\n)var __ceru_entry =/,
+      '$1const __ceru_entry =',
+    )
+    assertBundledDependencies(source)
     chunks.set(
       id,
-      'async function(ctx) {\n' +
-        result.outputFiles[0].text +
+      'async function ' + entryFunctionName(id, 'Surface') + '(ctx) {\n' +
+        source +
         '\nreturn __ceru_entry.default(ctx);\n}',
     )
     if (options.development) {
@@ -307,7 +338,7 @@ export async function buildProject(
   if (logicEntry) {
     const logic = chunks.get(logicEntry)
     if (!logic) throw new Error('Missing compiled logic entry: ' + logicEntry)
-    body.push('exports.activate = ' + logic + ';')
+    body.push('// Invisible plugin logic\nexports.activate = ' + logic + ';')
     emitted.add(logicEntry)
   }
   const visibleSurfaces = (config.manifest.modules.surfaces ?? []).filter(
@@ -320,16 +351,16 @@ export async function buildProject(
       emitted.add(surface.entry)
       return JSON.stringify(surface.id) + ': ' + entry
     })
-    body.push('exports.surfaces = {\n' + entries.join(',\n') + '\n};')
+    body.push('// Visible plugin surfaces\nexports.surfaces = {\n' + entries.join(',\n') + '\n};')
   }
   const modules = [...chunks].filter(([id]) => !emitted.has(id))
   if (modules.length)
     body.push(
-      'exports.modules = {\n' +
+      '// Additional plugin modules\nexports.modules = {\n' +
         modules.map(([id, entry]) => JSON.stringify(id) + ': ' + entry).join(',\n') +
         '\n};',
     )
-  body.push('exports.resources = ' + JSON.stringify(resources) + ';')
+  body.push('// Embedded static resources\nexports.resources = ' + JSON.stringify(resources) + ';')
   const header: ArtifactHeader = {
     formatVersion: 2,
     syntax: 'js',

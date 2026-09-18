@@ -59,6 +59,8 @@ for (const template of TEMPLATES) {
       assert.equal(artifact.header.manifest.engines.libraries, undefined)
       assert.equal(artifact.sourceFormat, 'exports-v2')
       assert.match(artifact.body, /exports\.(activate|surfaces|modules)/)
+      assert.match(artifact.body, /async function [A-Za-z][A-Za-z0-9]*\(ctx\)/)
+      assert.doesNotMatch(artifact.body, /\nvar __ceru_entry =/)
       assert.ok(!artifact.body.includes('__ceruSharedRequire'))
       const editor = parseEditorConfig(
         'launch.json',
