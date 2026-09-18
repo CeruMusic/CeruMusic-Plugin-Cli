@@ -14,7 +14,7 @@ import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project
 import { runDev } from './dev.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
-const VERSION = '0.2.1'
+const VERSION = '0.2.2'
 const HELP =
   'Ceru Plugin CLI ' +
   VERSION +

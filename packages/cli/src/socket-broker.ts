@@ -37,7 +37,6 @@ const privateAddress = (address: string): boolean => {
     parts[0] === 127 ||
     (parts[0] === 169 && parts[1] === 254) ||
     (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
-    (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) ||
     parts[0] >= 224 ||
     (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
     (parts[0] === 192 && parts[1] === 168)
