@@ -57,6 +57,8 @@ for (const template of TEMPLATES) {
       assert.equal(built.path, join(root, 'dist/plugin.js'))
       assert.ok(!artifact.body.includes('sourceMappingURL'))
       assert.equal(artifact.header.manifest.engines.libraries, undefined)
+      assert.equal(artifact.sourceFormat, 'exports-v2')
+      assert.match(artifact.body, /exports\.(activate|surfaces|modules)/)
       assert.ok(!artifact.body.includes('__ceruSharedRequire'))
       const editor = parseEditorConfig(
         'launch.json',
@@ -165,7 +167,7 @@ test('rejects extra execution, getters and duplicate keys', () => {
   const { artifact } = fixtures.get('source')
   assert.throws(
     () => readArtifact(encodeArtifact(artifact.header, artifact.body + '\nprocess.exit(0)')),
-    /one registration/,
+    /exports assignment/,
   )
   assert.throws(
     () =>
@@ -179,6 +181,81 @@ test('rejects extra execution, getters and duplicate keys', () => {
   )
   assert.throws(() => parseJsonStrict('{"id":1,"id":2}'), /Duplicate key/)
   assert.throws(() => parseJsonStrict('{"__proto__":{"admin":true}}'), /Unsafe/)
+})
+test('a hand-written exports plugin validates without npm or the CLI', () => {
+  const { artifact } = fixtures.get('source')
+  const manifest = structuredClone(artifact.header.manifest)
+  const text =
+    'exports.manifest = ' +
+    JSON.stringify(manifest) +
+    ';\nexports.package = {"formatVersion":2,"syntax":"js","signature":null};\n' +
+    "const http = require('@ceru/http');\n" +
+    'exports.activate = async function(core) { return http && core; };\n'
+  const parsed = readArtifact(text)
+  assert.equal(parsed.sourceFormat, 'exports-v2')
+  assert.ok(parsed.modules[manifest.modules.logic.entry])
+})
+test('the distributed hand-written example is a valid combined plugin', async () => {
+  const artifact = readArtifact(
+    await readFile(resolve(workspace, 'examples/handwritten/plugin.js')),
+  )
+  assert.equal(artifact.sourceFormat, 'exports-v2')
+  assert.ok(artifact.modules['logic.main'])
+  assert.ok(artifact.modules['view.hello'])
+})
+test('hand-written plugins may require only literal Host modules', () => {
+  const { artifact } = fixtures.get('source')
+  const header = artifact.header
+  assert.throws(
+    () =>
+      readArtifact(
+        encodeArtifact(
+          header,
+          "const name = '@ceru/http'; exports.activate = async function(core) { return require(name); };",
+        ),
+      ),
+    /literal Host module/,
+  )
+  assert.throws(
+    () =>
+      readArtifact(
+        encodeArtifact(
+          header,
+          "exports.activate = async function(core) { return require('axios'); };",
+        ),
+      ),
+    /documented Host modules/,
+  )
+  assert.throws(
+    () =>
+      readArtifact(
+        encodeArtifact(
+          header,
+          'const data = { value: globalThis.run() }; exports.activate = async function() {};',
+        ),
+      ),
+    /literal object/,
+  )
+})
+test('CLI bundles third-party CommonJS dependencies but keeps Host modules external', async () => {
+  const root = await fixture('bundled-requires', 'source', 'js')
+  await writeFile(
+    join(root, 'src/index.js'),
+    [
+      "import { definePlugin } from '@shiqianjiang/ceru-plugin-sdk'",
+      "const JSON5 = require('json5')",
+      "const host = require('@ceru/http')",
+      'export default definePlugin((ctx) => { ctx.log.info(String(JSON5.parse("{ok:true}").ok && !!host)) })',
+    ].join('\n'),
+  )
+  await mkdir(join(root, 'node_modules/json5'), { recursive: true })
+  await cp(resolve(workspace, 'node_modules/json5'), join(root, 'node_modules/json5'), {
+    recursive: true,
+  })
+  const built = await buildProject(root)
+  const artifact = readArtifact(await readFile(built.path))
+  assert.ok(artifact.body.includes('__ceruRequire'))
+  assert.ok(!artifact.body.includes("require('json5')"))
 })
 test('rejects runtime imports and malformed registration', () => {
   const { artifact } = fixtures.get('source')

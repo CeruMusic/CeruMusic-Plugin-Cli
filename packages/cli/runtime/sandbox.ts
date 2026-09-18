@@ -1,5 +1,11 @@
 import * as lodash from 'lodash-es'
 import { HOST_ICON_NAMES, HOST_ASSET_NAMES, LODASH_METHODS } from '../../sdk/src/catalog'
+import { createHttpClient } from '../../sdk/src/http'
+import { HOST_SERVICE_METHODS } from '../../sdk/src/services'
+import * as cryptoTools from '../../sdk/src/compat/crypto.js'
+import * as compressionTools from '../../sdk/src/compat/zlib.js'
+import * as encodingTools from '../../sdk/src/compat/encoding.js'
+import { createLegacyHttpBridge } from '../../sdk/src/legacy-http'
 
 let initialized: any
 let entry: any
@@ -10,10 +16,43 @@ const pending = new Map<
   { resolve: (v: any) => void; reject: (e: Error) => void; timer: any }
 >()
 const providers = new Map<string, any>()
+const playlistImporters = new Map<string, any>()
 const actions = new Map<string, any>()
 const operations = new Map<string, AbortController>()
 const subscriptions = new Set<(state: any) => void>()
 const disposers: (() => unknown)[] = []
+const socketHandlers = new Map<string, Map<string, Set<(value: any) => void>>>()
+const providerAliases: Record<string, string> = {
+  'tracks.search': 'search',
+  'tracks.resolve': 'resolve',
+  'tracks.lyrics': 'lyrics',
+  'playlists.categories': 'categories',
+  'playlists.list': 'list',
+  'playlists.get': 'list',
+  'sharing.describe': 'share',
+}
+function providerMethod(implementation: any, method: string): unknown {
+  const parts = method.split('.')
+  const owner = parts.slice(0, -1).reduce((value, key) => value?.[key], implementation)
+  const nested = owner?.[parts.at(-1)!]
+  return typeof nested === 'function'
+    ? nested.bind(owner)
+    : typeof implementation?.[providerAliases[method]] === 'function'
+      ? implementation[providerAliases[method]].bind(implementation)
+      : undefined
+}
+function providerMethods(implementation: any): string[] {
+  const methods = new Set<string>()
+  for (const [group, value] of Object.entries(implementation ?? {})) {
+    if (typeof value === 'function') methods.add(group)
+    else if (value && typeof value === 'object')
+      for (const [method, handler] of Object.entries(value))
+        if (typeof handler === 'function') methods.add(group + '.' + method)
+  }
+  for (const [nested, legacy] of Object.entries(providerAliases))
+    if (typeof implementation?.[legacy] === 'function') methods.add(nested)
+  return [...methods]
+}
 const clean = (value: any): any => {
   const seen = new WeakSet()
   try {
@@ -103,18 +142,38 @@ function shared() {
     },
   }
 }
+function applySurfaceStyles(): void {
+  if (initialized.kind !== 'web') return
+  for (const contribution of initialized.manifest.contributes?.styles ?? []) {
+    const applies =
+      contribution.scope === 'surface' ||
+      (contribution.scope === 'slot' &&
+        initialized.mount?.kind === 'slot' &&
+        contribution.slots?.includes(initialized.mount.slot))
+    if (!applies) continue
+    const resource = initialized.resources[contribution.resource]
+    if (resource?.type !== 'text') continue
+    const style = document.createElement('style')
+    style.dataset.ceruStyle = contribution.id
+    style.textContent = resource.value
+    document.head.append(style)
+  }
+}
 function context() {
   const base = shared()
-  if (initialized.kind === 'web')
+  if (initialized.kind === 'web') {
+    applySurfaceStyles()
     return {
       ...base,
       root: document.getElementById('plugin-root'),
+      mount: initialized.mount ?? { kind: 'page' },
       invoke: (action: string, input: any) => rpc('surface.invoke', { action, input }),
       subscribe: (handler: (state: any) => void) => {
         subscriptions.add(handler)
         return () => subscriptions.delete(handler)
       },
     }
+  }
   if (initialized.kind === 'guest')
     return {
       host: base.host,
@@ -130,8 +189,52 @@ function context() {
   const declared = initialized.manifest
   return {
     ...base,
+    ...Object.fromEntries(
+      Object.entries(HOST_SERVICE_METHODS).map(([service, methods]) => [
+        service,
+        Object.fromEntries(
+          methods.map((method) => [
+            method,
+            (...args: any[]) => rpc('services.' + service + '.' + method, { args }),
+          ]),
+        ),
+      ]),
+    ),
+    events: {
+      on: () => {
+        throw new Error('Application events require a connected desktop Host')
+      },
+    },
     plugin: { id: declared.id, version: declared.version },
     config: { get: () => rpc('config.get') },
+    playlistImporters: {
+      register: (id: string, implementation: any) => {
+        if (!declared.contributes?.playlistImporters?.some((p: any) => p.id === id))
+          throw new Error('Undeclared playlist importer: ' + id)
+        playlistImporters.set(id, implementation)
+        send('register', { kind: 'playlist-importer', id, methods: Object.keys(implementation) })
+        return () => {
+          playlistImporters.delete(id)
+          send('unregister', { kind: 'playlist-importer', id })
+        }
+      },
+    },
+    library: {
+      playlists: Object.fromEntries(
+        ['list', 'getTracks', 'import'].map((method) => [
+          method,
+          (data: any) =>
+            rpc('library.playlists.' + method, {
+              ...data,
+              operation: {
+                id: data.operation?.id,
+                deadlineAt: data.operation?.deadlineAt,
+                userIntent: data.operation?.userIntent,
+              },
+            }),
+        ]),
+      ),
+    },
     providers: {
       register: (id: string, implementation: any) => {
         if (!declared.contributes?.providers?.some((p: any) => p.id === id))
@@ -140,9 +243,7 @@ function context() {
         send('register', {
           kind: 'provider',
           id,
-          methods: Object.keys(implementation).filter(
-            (name) => typeof implementation[name] === 'function',
-          ),
+          methods: providerMethods(implementation),
         })
         return () => {
           providers.delete(id)
@@ -163,10 +264,29 @@ function context() {
       },
     },
     permissions: {
+      getGranted: () => rpc('permissions.getGranted'),
+      requestGroup: (data: any) => rpc('permissions.requestGroup', data),
       query: (data: any) => rpc('permissions.query', data),
       request: (data: any) => rpc('permissions.request', data),
     },
     http: {
+      create: (options: any) =>
+        createHttpClient(
+          {
+            http: {
+              request: (data: any) =>
+                rpc('http.request', {
+                  ...data,
+                  operation: { id: data.operation?.id, deadlineAt: data.operation?.deadlineAt },
+                }),
+            },
+            permissions: {
+              query: (data: any) => rpc('permissions.query', data),
+              request: (data: any) => rpc('permissions.request', data),
+            },
+          },
+          options,
+        ),
       request: (data: any) =>
         rpc('http.request', {
           ...data,
@@ -174,12 +294,70 @@ function context() {
         }),
     },
     credentials: { get: () => Promise.resolve(null) },
-    media: {
-      createLease: (data: any) =>
-        rpc('media.createLease', { ...data, operation: { id: data.operation?.id } }),
+    sockets: {
+      connect: async (data: any) => {
+        const permissionKey = data.permissionKey ?? 'network.socket'
+        let permission = await rpc('permissions.query', { key: permissionKey })
+        if (permission.status === 'prompt')
+          permission = await rpc('permissions.request', {
+            key: permissionKey,
+            intent: data.operation?.userIntent,
+          })
+        if (permission.status !== 'granted') throw new Error('Socket permission is not granted')
+        data.operation?.signal?.throwIfAborted()
+        const { id } = await rpc('sockets.connect', {
+          ...data,
+          permissionKey,
+          operation: { id: data.operation?.id, deadlineAt: data.operation?.deadlineAt },
+        })
+        const handlers = new Map<string, Set<(value: any) => void>>()
+        socketHandlers.set(id, handlers)
+        const disconnect = async () => {
+          socketHandlers.delete(id)
+          await rpc('sockets.disconnect', { id })
+        }
+        disposers.push(disconnect)
+        return {
+          id,
+          on: (event: string, handler: (value: any) => void) => {
+            let listeners = handlers.get(event)
+            if (!listeners) {
+              listeners = new Set()
+              handlers.set(event, listeners)
+            }
+            listeners.add(handler)
+            return () => {
+              listeners?.delete(handler)
+            }
+          },
+          emit: (event: string, value: any) => rpc('sockets.send', { id, event, data: value }),
+          send: (value: any) => rpc('sockets.send', { id, event: 'message', data: value }),
+          disconnect,
+        }
+      },
     },
     playback: { failure: (error: any) => ({ ok: false, error }) },
     ui: {
+      dialogs: {
+        confirm: (data: any) => rpc('ui.dialogs.confirm', data),
+        prompt: (data: any) => rpc('ui.dialogs.prompt', data),
+        pickPlaylist: (data: any) => rpc('ui.dialogs.pickPlaylist', data),
+      },
+      navigation: { open: (data: any) => rpc('ui.navigation.open', data) },
+      notifications: {
+        show: (data: any, call: any) => rpc('ui.notifications.show', { ...data, call }),
+      },
+      progress: Object.fromEntries(
+        ['create', 'update', 'close'].map((method) => [
+          method,
+          (...args: any[]) => rpc('ui.progress.' + method, { args }),
+        ]),
+      ),
+      toast: (message: any) => {
+        send('notify', { key: 'toast', level: 'info', ...message })
+        return Promise.resolve()
+      },
+      playlistImport: { open: (data: any) => rpc('ui.playlistImport.open', data) },
       setState: (surfaceId: string, state: any) => {
         send('state', { surfaceId, state })
         return Promise.resolve()
@@ -224,6 +402,32 @@ async function start() {
   started = true
   try {
     const ctx = context()
+    const builtinModules: Record<string, any> = {
+      ceru: ctx,
+      '@ceru/tools': ctx.utils,
+      lodash: ctx.utils?.lodash,
+      '@ceru/crypto': cryptoTools,
+      '@ceru/compression': compressionTools,
+      '@ceru/encoding': encodingTools,
+      '@ceru/legacy-http': { createLegacyHttpBridge },
+    }
+    if (initialized.kind === 'logic')
+      Object.assign(builtinModules, {
+        '@ceru/http': (ctx as any).http,
+        '@ceru/ui': (ctx as any).ui,
+        '@ceru/socket': (ctx as any).sockets,
+        '@ceru/library': (ctx as any).library,
+        '@ceru/account': (ctx as any).account,
+        '@ceru/player': (ctx as any).player,
+      })
+    const requireBuiltin = (name: string) => {
+      if (!Object.hasOwn(builtinModules, name))
+        throw new Error('Module is not provided by this Host: ' + name)
+      return builtinModules[name]
+    }
+    ;(ctx as any).modules = { require: requireBuiltin }
+    ;(globalThis as any).__ceruRequire = requireBuiltin
+    ;(globalThis as any).require = requireBuiltin
     ;(globalThis as any).__ceruContext = ctx
     const dispose = await entry(ctx)
     if (typeof dispose === 'function') disposers.push(dispose)
@@ -257,7 +461,20 @@ window.addEventListener('message', async (event) => {
     }
   }
   if (message.type === 'state') for (const handler of subscriptions) handler(message.data)
-  if (message.type === 'cancel') operations.get(message.data.id)?.abort()
+  if (message.type === 'socket-event') {
+    const { id, event, data } = message.data
+    for (const handler of socketHandlers.get(id)?.get(event) ?? []) {
+      try {
+        handler(data)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+  }
+  if (message.type === 'cancel') {
+    operations.get(message.data.id)?.abort()
+    void rpc('operations.cancel', { id: message.data.id }).catch(() => {})
+  }
   if (message.type === 'invoke') {
     const { id, kind, target, method, args } = message.data
     const abort = new AbortController()
@@ -270,7 +487,12 @@ window.addEventListener('message', async (event) => {
       userIntent: { kind: 'user-intent', id },
     }
     try {
-      const fn = kind === 'action' ? actions.get(target) : providers.get(target)?.[method]
+      const fn =
+        kind === 'action'
+          ? actions.get(target)
+          : kind === 'playlist-importer'
+            ? playlistImporters.get(target)?.[method]
+            : providerMethod(providers.get(target), method)
       if (typeof fn !== 'function') throw new Error('Method is not registered')
       const value = await fn(...args, operation)
       send('invoke-result', { id, value })

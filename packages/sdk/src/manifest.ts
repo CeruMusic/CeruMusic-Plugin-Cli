@@ -1,4 +1,5 @@
 import type { HostIconName, PermissionName } from './catalog.js'
+import type { MenuContribution } from './services.js'
 
 export type JsonValue =
   | null
@@ -31,6 +32,42 @@ export interface SurfaceDeclaration {
   kind: 'schema' | 'web'
   entry: string
 }
+export type HomeSectionKind = 'playlists' | 'charts' | 'custom'
+export type UISlotName =
+  | 'home.header'
+  | 'home.content.before'
+  | 'home.content.after'
+  | 'search.source-selector.after'
+  | 'playlist.header.actions'
+  | 'playlist.item.actions'
+  | 'player.actions'
+  | 'settings.sections'
+export interface HomeSectionContribution {
+  id: string
+  title: string
+  kind: HomeSectionKind
+  icon?: IconRef
+  /** Required for custom sections; built-in playlist/chart sections keep the existing Host UI. */
+  view?: string
+  providerIds?: string[]
+  order?: number
+}
+export interface UIExtensionContribution {
+  id: string
+  slot: UISlotName
+  mode: 'append' | 'prepend' | 'wrap' | 'replace'
+  /** Sandboxed visible Surface. Plugin JavaScript never runs in the application renderer. */
+  view: string
+  order?: number
+  when?: { loggedIn?: boolean; route?: string }
+}
+export interface StyleContribution {
+  id: string
+  resource: string
+  scope: 'surface' | 'slot' | 'application'
+  slots?: UISlotName[]
+  order?: number
+}
 export interface PluginManifest {
   manifestVersion: 2
   id: string
@@ -52,6 +89,20 @@ export interface PluginManifest {
   }
   contributes?: {
     providers?: ProviderDeclaration[]
+    /** Home tabs exist only while at least one enabled plugin contributes them. */
+    homeSections?: HomeSectionContribution[]
+    /** Controlled UI composition. The Host owns the target DOM and lifecycle. */
+    uiExtensions?: UIExtensionContribution[]
+    /** Surface/slot styles are scoped. Application styles require ui.styles.global. */
+    styles?: StyleContribution[]
+    menus?: MenuContribution[]
+    /** Entries for the application's existing playlist import menu/dialog. */
+    playlistImporters?: {
+      id: string
+      title: string
+      description?: string
+      placeholder?: string
+    }[]
     commands?: { id: string; title: string; action: string; view?: string }[]
     sidebarItems?: { id: string; group: string; title: string; view: string }[]
     settingsPages?: { id: string; title: string; view: string }[]

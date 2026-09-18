@@ -44,11 +44,12 @@
         <section>
           <h2>搜索与解析</h2>
           <div class="row">
-            <select id="provider"></select
-            ><input id="query" placeholder="输入关键词" /><button id="search" class="primary">
+            <select id="provider" disabled aria-label="搜索来源"></select
+            ><input id="query" placeholder="输入关键词" disabled /><button id="search" class="primary" disabled>
               调用搜索</button
-            ><button id="cancel">取消调用</button>
+            ><button id="cancel" disabled>取消调用</button>
           </div>
+          <p id="search-status" class="hint" role="status" aria-live="polite">正在读取插件能力…</p>
           <div id="results" class="results">
             <div class="empty">插件启动后可以调用已注册的搜索方法。</div>
           </div>
@@ -88,6 +89,6 @@
     <script nonce="{{NONCE}}">
       window.CERU_DEV_TOKEN={{TOKEN}};
     </script>
-    <script src="/playground.js"></script>
+    <script type="module" src="/playground.js"></script>
   </body>
 </html>

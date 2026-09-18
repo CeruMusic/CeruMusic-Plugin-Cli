@@ -26,7 +26,27 @@ npm run build
 npm run validate
 ```
 
-最终只交付 dist/plugin.js。也可通过 ceru-plugin build --out dist/plugin.jsx 选择 .jsx 文件名；内容仍是完成编译的标准 JavaScript，不要求安装时再编译 JSX。
+最终只交付 `dist/plugin.js`。`.jsx/.tsx/.vue` 只是开发源码，安装时不再编译。
+
+CLI 是可选工具，不是插件运行标准。无需 npm 的手写插件见 [examples/handwritten/plugin.js](examples/handwritten/plugin.js)：
+
+```javascript
+exports.manifest = {
+  manifestVersion: 2,
+  id: 'example.hello',
+  name: '问候插件',
+  version: '1.0.0',
+  engines: { hostApi: '^2.0.0', logicRuntime: 'ceru-js@1' },
+  modules: { logic: { entry: 'logic.main' } },
+}
+
+exports.activate = async function (core) {
+  const ui = require('@ceru/ui')
+  core.log.info('插件已启动', { hasUi: Boolean(ui) })
+}
+```
+
+安装器静态读取 `exports.manifest`，不会执行插件来获取名称或权限。`exports.activate` 是不可见逻辑，`exports.surfaces` 是可见界面，两者可以同时存在。
 
 ## 模板
 
@@ -53,6 +73,29 @@ npm run validate
 从 0.1.2 开始，Vue/React 的生产运行代码直接打入每个插件的页面入口，与模板编译结果、样式和资源一起交付。宿主不提供 Vue/React，不需要 npm 依赖、CDN 或额外框架文件。旧工程的 sharedLibraries 配置会在构建时兼容处理，不再生成宿主框架依赖。
 
 发行文件不会把 node_modules、TypeScript 编译器、Vue SFC 编译器、开发服务器或 npm 工程交给插件用户。
+
+## require 与依赖
+
+手写文件可直接 `require('@ceru/http')`、`require('@ceru/ui')`、`require('@ceru/socket')`、`require('@ceru/library')`、`require('@ceru/account')`、`require('@ceru/player')`、`require('@ceru/tools')`、`require('@ceru/crypto')`、`require('@ceru/compression')`、`require('@ceru/encoding')` 或 `require('lodash')`。这些模块由 Host 提供，不增加插件包体。
+
+CLI 项目中的其他 npm 包、本地模块、ESM import 和字面量 CommonJS require 均由 esbuild 打入最终文件。动态 require、未知 `@ceru/*` 模块、残留 import 和无法在浏览器运行的 Node 原生模块会在构建时失败。离开 CLI 时可以使用任意 bundler；Core 不读取 `node_modules`。
+
+## Provider 与首页
+
+Provider 按业务域组织，减少含糊的通用方法：
+
+```typescript
+core.providers.register('tx', {
+  tracks: { search, resolve, lyrics },
+  playlists: { search, categories, list, get },
+  charts: { list, getTracks },
+  sharing: { describe },
+})
+```
+
+首页页签由 `contributes.homeSections` 提供。没有启用插件贡献 `playlists` 或 `charts` 时，正式 Host 不显示对应首页页签；安装音源插件后复用软件现有歌单和排行榜界面。`uiExtensions` 可以在稳定 Slot 中追加、前置、包裹或替换隔离 Surface。CSS 通过 `styles` 贡献，Surface/Slot CSS 自动限定作用域；全局 CSS 需要 `ui.styles.global` 权限。插件 JavaScript始终留在沙箱中，不直接获得 Electron renderer DOM。
+
+标准歌曲、歌词、歌单、排行榜、分享和权限说明见 [宿主服务与数据契约](docs/HOST-SERVICES.md)。
 
 使用 npm run build 后，再运行 ceru-plugin preview dist/plugin.js：预览只读取发行文件，不访问源码工程，不注入 Vue/React。Vue 组件不可能在没有任何运行代码的情况下工作；这里把所需生产运行代码编成了文件内部的普通 JavaScript，而不是把开发环境带给用户。
 
@@ -99,7 +142,7 @@ ceru-plugin keygen --out .keys/publisher
 ceru-plugin sign dist/plugin.js --key .keys/publisher.private.pem
 ```
 
-dev 默认打开独立 Electron 窗口；首次运行可能下载 Electron 二进制。--no-open 只运行本地工作台服务。未声明/未授予的网络请求默认拒绝；权限面板可授予精确 origin。
+dev 默认打开独立 Electron 窗口；首次运行可能下载 Electron 二进制。--no-open 只运行本地工作台服务。`network.request` 授权任意公网 HTTP(S)，`network.socket` 授权公网实时连接；局域网和 localhost 另需 `network.private`，不维护域名白名单。
 
 开发 Host 提供真实模块执行、隔离页面、HTTP 代理和有限媒体预览。生产安装授权、系统凭据保险箱、完整音乐业务、Guest 安装与分享服务不由此工作台代替。未实现的能力会明确报错。
 

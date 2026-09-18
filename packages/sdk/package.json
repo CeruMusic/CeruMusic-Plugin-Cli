@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed authoring contracts for Ceru Music v2 single-file plugins",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,6 +20,71 @@
       "types": "./dist/catalog.d.ts",
       "import": "./dist/catalog.js",
       "default": "./dist/catalog.js"
+    },
+    "./music": {
+      "types": "./dist/music.d.ts",
+      "import": "./dist/music.js",
+      "default": "./dist/music.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "import": "./dist/permissions.js",
+      "default": "./dist/permissions.js"
+    },
+    "./services": {
+      "types": "./dist/services.d.ts",
+      "import": "./dist/services.js",
+      "default": "./dist/services.js"
+    },
+    "./modules": {
+      "types": "./dist/modules.d.ts",
+      "import": "./dist/modules.js",
+      "default": "./dist/modules.js"
+    },
+    "./library": {
+      "types": "./dist/library.d.ts",
+      "import": "./dist/library.js",
+      "default": "./dist/library.js"
+    },
+    "./host-library": {
+      "types": "./dist/host-library.d.ts",
+      "import": "./dist/host-library.js",
+      "default": "./dist/host-library.js"
+    },
+    "./sockets": {
+      "types": "./dist/sockets.d.ts",
+      "import": "./dist/sockets.js",
+      "default": "./dist/sockets.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "default": "./dist/http.js"
+    },
+    "./legacy-http": {
+      "types": "./dist/legacy-http.d.ts",
+      "import": "./dist/legacy-http.js",
+      "default": "./dist/legacy-http.js"
+    },
+    "./compat/crypto": {
+      "types": "./dist/compat/crypto.d.ts",
+      "import": "./dist/compat/crypto.js",
+      "default": "./dist/compat/crypto.js"
+    },
+    "./compat/zlib": {
+      "types": "./dist/compat/zlib.d.ts",
+      "import": "./dist/compat/zlib.js",
+      "default": "./dist/compat/zlib.js"
+    },
+    "./compat/encoding": {
+      "types": "./dist/compat/encoding.d.ts",
+      "import": "./dist/compat/encoding.js",
+      "default": "./dist/compat/encoding.js"
+    },
+    "./compat/format": {
+      "types": "./dist/compat/format.d.ts",
+      "import": "./dist/compat/format.js",
+      "default": "./dist/compat/format.js"
     }
   },
   "files": [
@@ -29,7 +94,11 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@types/lodash": "^4.17.25"
+    "@types/lodash": "^4.17.25",
+    "buffer": "^6.0.3",
+    "crypto-js": "^4.2.0",
+    "fflate": "^0.8.2",
+    "json5": "^2.2.3"
   },
   "author": "澜音团队",
   "engines": {

@@ -16,6 +16,7 @@ import ts from 'typescript'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { stylesheetPlugin, vuePlugin, webDistEntry } from './frameworks.js'
+import { hostModulesPlugin, assertBundledDependencies } from './dependencies.js'
 import {
   encodeArtifact,
   parseJsonStrict,
@@ -132,9 +133,9 @@ export async function buildProject(
   }
   const program = checkTypes(root)
   const checker = program.getTypeChecker()
-  const chunks: string[] = []
+  const chunks = new Map<string, string>()
   const devModules: Record<string, string> = {}
-  const plugins = [vuePlugin(root, config.framework), stylesheetPlugin()]
+  const plugins = [hostModulesPlugin(), vuePlugin(root, config.framework), stylesheetPlugin()]
   const defines = {
     'process.env.NODE_ENV': '"production"',
     __VUE_OPTIONS_API__: 'true',
@@ -192,9 +193,10 @@ export async function buildProject(
     for (const info of Object.values(result.metafile.outputs))
       if (info.imports.length) throw new Error('Unbundled import in ' + id)
     const source = result.outputFiles[0].text
-    chunks.push(
-      JSON.stringify(id) +
-        ': async function(ctx) {\n' +
+    assertBundledDependencies(source)
+    chunks.set(
+      id,
+      'async function(ctx) {\n' +
         source +
         '\nif (typeof __ceru_entry.default !== "function") throw new Error("Entry must default-export a function");\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -217,7 +219,8 @@ export async function buildProject(
         outfile: 'entry.js',
         plugins,
         define: defines,
-        footer: { js: 'globalThis.__ceruStart(__ceru_entry.default);' },
+        banner: { js: 'globalThis.__ceruStart(async function(ctx) {' },
+        footer: { js: 'return __ceru_entry.default(ctx); });' },
         loader: {
           '.svg': 'dataurl',
           '.css': 'text',
@@ -251,9 +254,10 @@ export async function buildProject(
     }
     const result = await build(base)
     if (result.outputFiles.length !== 1) throw new Error('webDist emitted an external file')
-    chunks.push(
-      JSON.stringify(id) +
-        ': async function(ctx) {\n' +
+    assertBundledDependencies(result.outputFiles[0].text)
+    chunks.set(
+      id,
+      'async function(ctx) {\n' +
         result.outputFiles[0].text +
         '\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -262,7 +266,8 @@ export async function buildProject(
         ...base,
         sourcemap: 'inline',
         sourceRoot: 'ceru:///',
-        footer: { js: 'globalThis.__ceruStart(__ceru_entry.default);' },
+        banner: { js: 'globalThis.__ceruStart(async function(ctx) {' },
+        footer: { js: 'return __ceru_entry.default(ctx); });' },
       })
       devModules[id] = debug.outputFiles[0].text
     }
@@ -296,23 +301,46 @@ export async function buildProject(
         mime: input.mime ?? 'application/octet-stream',
       }
   }
-  const body =
-    'CeruPlugin.define({\nmodules: {\n' +
-    chunks.join(',\n') +
-    '\n},\nresources: ' +
-    JSON.stringify(resources) +
-    '\n})\n'
+  const emitted = new Set<string>()
+  const body: string[] = []
+  const logicEntry = config.manifest.modules.logic?.entry
+  if (logicEntry) {
+    const logic = chunks.get(logicEntry)
+    if (!logic) throw new Error('Missing compiled logic entry: ' + logicEntry)
+    body.push('exports.activate = ' + logic + ';')
+    emitted.add(logicEntry)
+  }
+  const visibleSurfaces = (config.manifest.modules.surfaces ?? []).filter(
+    (surface) => surface.kind === 'web',
+  )
+  if (visibleSurfaces.length) {
+    const entries = visibleSurfaces.map((surface) => {
+      const entry = chunks.get(surface.entry)
+      if (!entry) throw new Error('Missing compiled Surface entry: ' + surface.entry)
+      emitted.add(surface.entry)
+      return JSON.stringify(surface.id) + ': ' + entry
+    })
+    body.push('exports.surfaces = {\n' + entries.join(',\n') + '\n};')
+  }
+  const modules = [...chunks].filter(([id]) => !emitted.has(id))
+  if (modules.length)
+    body.push(
+      'exports.modules = {\n' +
+        modules.map(([id, entry]) => JSON.stringify(id) + ': ' + entry).join(',\n') +
+        '\n};',
+    )
+  body.push('exports.resources = ' + JSON.stringify(resources) + ';')
   const header: ArtifactHeader = {
     formatVersion: 2,
     syntax: 'js',
     manifest: config.manifest,
     signature: null,
   }
-  const artifact = encodeArtifact(header, body)
+  const artifact = encodeArtifact(header, body.join('\n') + '\n')
   readArtifact(artifact)
   const output = resolve(root, options.out ?? config.output ?? 'dist/plugin.js')
-  if (!['.js', '.jsx'].includes(extname(output)))
-    throw new Error('Final output must be a .js or .jsx file containing compiled JavaScript')
+  if (extname(output) !== '.js')
+    throw new Error('Final output must be a .js file containing compiled JavaScript')
   const rel = relative(root, output)
   if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel))
     throw new Error('Build output must stay inside project')

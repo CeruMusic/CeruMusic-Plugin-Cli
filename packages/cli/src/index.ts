@@ -14,7 +14,7 @@ import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project
 import { runDev } from './dev.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
-const VERSION = '0.1.2'
+const VERSION = '0.2.0'
 const HELP =
   'Ceru Plugin CLI ' +
   VERSION +
@@ -35,8 +35,7 @@ const HELP =
   'v2 Host integration is required. Validation does not execute or sandbox plugin code.\n'
 
 async function jsOutput(path: string, bytes: Uint8Array, force: boolean): Promise<void> {
-  if (!['.js', '.jsx'].includes(extname(path)))
-    throw new Error('Output must be .js or .jsx containing compiled JavaScript')
+  if (extname(path) !== '.js') throw new Error('Output must be .js containing compiled JavaScript')
   await writeAtomic(resolve(path), bytes, force)
   console.log('Wrote ' + resolve(path) + ' (' + bytes.length + ' bytes)')
 }
@@ -176,6 +175,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       bytes: bytes.length,
       modules: Object.keys(result.modules),
       resources: Object.keys(result.resources),
+      sourceFormat: result.sourceFormat,
+      migrationWarnings: result.migrationWarnings,
       signature: result.signatureStatus,
       codeDigest: result.codeDigest,
       templateDigest: result.templateDigest,

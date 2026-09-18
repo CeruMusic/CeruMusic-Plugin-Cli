@@ -13,7 +13,7 @@ import { pipeline } from 'node:stream/promises'
 import { parse, parseExpressionAt } from 'acorn'
 import { Ajv } from 'ajv'
 import type { JsonObject, JsonValue, PluginManifest } from '@shiqianjiang/ceru-plugin-sdk/manifest'
-import { PERMISSION_NAMES } from '@shiqianjiang/ceru-plugin-sdk/catalog'
+import { HOST_MODULE_NAMES, PERMISSION_NAMES } from '@shiqianjiang/ceru-plugin-sdk/catalog'
 
 export const FORMAT_VERSION = 2
 export const LIMITS = {
@@ -65,6 +65,8 @@ export interface Artifact {
   codeDigest: string
   templateDigest?: string
   signatureStatus: 'unsigned' | 'verified-untrusted' | 'verified-trusted'
+  sourceFormat: 'exports-v2' | 'ceru-plugin-define-v2'
+  migrationWarnings: string[]
 }
 export interface ValidationOptions {
   trustedPublicKeys?: string[]
@@ -215,6 +217,121 @@ export const MANIFEST_SCHEMA = object(
       },
     }),
     contributes: object({
+      menus: {
+        type: 'array',
+        maxItems: 64,
+        items: object(
+          {
+            id,
+            title: string,
+            commandId: id,
+            slot: {
+              enum: [
+                'playlist.import',
+                'playlist.actions',
+                'track.actions',
+                'player.actions',
+                'search.tools',
+              ],
+            },
+            icon: {
+              oneOf: [
+                object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
+                object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
+              ],
+            },
+            when: object({
+              kinds: { type: 'array', items: { enum: ['track', 'playlist'] } },
+              loggedIn: { type: 'boolean' },
+            }),
+          },
+          ['id', 'slot', 'title', 'commandId'],
+        ),
+      },
+      homeSections: {
+        type: 'array',
+        maxItems: 32,
+        items: object(
+          {
+            id,
+            title: string,
+            kind: { enum: ['playlists', 'charts', 'custom'] },
+            icon: {
+              oneOf: [
+                object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
+                object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
+              ],
+            },
+            view: id,
+            providerIds: strings,
+            order: { type: 'integer', minimum: -1000, maximum: 1000 },
+          },
+          ['id', 'title', 'kind'],
+        ),
+      },
+      uiExtensions: {
+        type: 'array',
+        maxItems: 64,
+        items: object(
+          {
+            id,
+            slot: {
+              enum: [
+                'home.header',
+                'home.content.before',
+                'home.content.after',
+                'search.source-selector.after',
+                'playlist.header.actions',
+                'playlist.item.actions',
+                'player.actions',
+                'settings.sections',
+              ],
+            },
+            mode: { enum: ['append', 'prepend', 'wrap', 'replace'] },
+            view: id,
+            order: { type: 'integer', minimum: -1000, maximum: 1000 },
+            when: object({ loggedIn: { type: 'boolean' }, route: string }),
+          },
+          ['id', 'slot', 'mode', 'view'],
+        ),
+      },
+      styles: {
+        type: 'array',
+        maxItems: 64,
+        items: object(
+          {
+            id,
+            resource: id,
+            scope: { enum: ['surface', 'slot', 'application'] },
+            slots: {
+              type: 'array',
+              maxItems: 16,
+              items: {
+                enum: [
+                  'home.header',
+                  'home.content.before',
+                  'home.content.after',
+                  'search.source-selector.after',
+                  'playlist.header.actions',
+                  'playlist.item.actions',
+                  'player.actions',
+                  'settings.sections',
+                ],
+              },
+            },
+            order: { type: 'integer', minimum: -1000, maximum: 1000 },
+          },
+          ['id', 'resource', 'scope'],
+        ),
+      },
+      playlistImporters: {
+        type: 'array',
+        maxItems: 64,
+        items: object({ id, title: string, description: string, placeholder: string }, [
+          'id',
+          'title',
+        ]),
+      },
       providers: {
         type: 'array',
         maxItems: 64,
@@ -312,6 +429,11 @@ export function validateManifest(value: unknown): asserts value is PluginManifes
     ensure(new Set(values).size === values.length, 'Duplicate ' + label)
   unique(manifest.permissions?.map((p) => p.key) ?? [], 'permission key')
   unique(manifest.modules.surfaces?.map((p) => p.id) ?? [], 'surface id')
+  for (const menu of manifest.contributes?.menus ?? [])
+    ensure(
+      manifest.contributes?.commands?.some((command) => command.id === menu.commandId),
+      'Unknown menu command: ' + menu.commandId,
+    )
   for (const items of Object.values(manifest.contributes ?? {}))
     unique(
       items.map((p) => p.id),
@@ -325,6 +447,33 @@ export function validateManifest(value: unknown): asserts value is PluginManifes
   ]) {
     for (const item of items ?? [])
       if (item.view) ensure(views.has(item.view), 'Unknown view: ' + item.view)
+  }
+  for (const section of manifest.contributes?.homeSections ?? []) {
+    if (section.kind === 'custom')
+      ensure(section.view && views.has(section.view), 'Custom home section requires a valid view')
+    else ensure(!section.view, 'Built-in home sections cannot replace the Host view')
+    for (const providerId of section.providerIds ?? [])
+      ensure(
+        manifest.contributes?.providers?.some((provider) => provider.id === providerId),
+        'Unknown home section provider: ' + providerId,
+      )
+  }
+  for (const extension of manifest.contributes?.uiExtensions ?? [])
+    if (extension.mode === 'wrap')
+      ensure(
+        manifest.modules.surfaces?.some(
+          (surface) => surface.id === extension.view && surface.kind === 'schema',
+        ),
+        'Wrap UI extensions require a schema view with a host-content node',
+      )
+    else ensure(views.has(extension.view), 'Unknown UI extension view: ' + extension.view)
+  for (const style of manifest.contributes?.styles ?? []) {
+    ensure(style.scope !== 'slot' || style.slots?.length, 'Slot style requires slots')
+    ensure(
+      style.scope !== 'application' ||
+        manifest.permissions?.some((permission) => permission.name === 'ui.styles.global'),
+      'Application styles require ui.styles.global',
+    )
   }
   if (manifest.contributes?.guestAdapters?.length)
     ensure(manifest.guestPolicy, 'guestPolicy is required for a guest adapter')
@@ -390,9 +539,15 @@ function checkProof(proof: Proof, data: Uint8Array): void {
   )
 }
 export function encodeHeader(header: ArtifactHeader): Buffer {
-  const json = JSON.stringify(header, null, 2).replace(/\*/g, '\\u002a')
-  const head = Buffer.from(START + json + END)
-  ensure(head.length <= LIMITS.header, 'Artifact header is too large')
+  const { manifest, ...metadata } = header
+  const head = Buffer.from(
+    'exports.manifest = ' +
+      JSON.stringify(manifest, null, 2) +
+      ';\nexports.package = ' +
+      JSON.stringify(metadata, null, 2) +
+      ';\n',
+  )
+  ensure(head.length <= LIMITS.header, 'Artifact metadata is too large')
   return head
 }
 export function encodeArtifact(header: ArtifactHeader, body: string): Buffer {
@@ -504,7 +659,7 @@ function validatePersonalization(
 function inspectBody(
   body: string,
   manifest: PluginManifest,
-): Pick<Artifact, 'modules' | 'resources'> {
+): Pick<Artifact, 'modules' | 'resources' | 'sourceFormat' | 'migrationWarnings'> {
   const tree = parse(body, { ecmaVersion: 2022, sourceType: 'script' }) as Ast
   const pending: Ast[] = [tree]
   let count = 0
@@ -515,6 +670,23 @@ function inspectBody(
       node.type !== 'ImportExpression',
       'External/dynamic import is not allowed in the final single-file artifact',
     )
+    if (
+      node.type === 'CallExpression' &&
+      node.callee?.type === 'Identifier' &&
+      node.callee.name === 'require'
+    ) {
+      ensure(
+        node.arguments.length === 1 &&
+          node.arguments[0].type === 'Literal' &&
+          typeof node.arguments[0].value === 'string',
+        'require() must use one literal Host module name',
+      )
+      ensure(
+        (HOST_MODULE_NAMES as readonly string[]).includes(node.arguments[0].value),
+        'Hand-written artifacts may require only documented Host modules: ' +
+          node.arguments[0].value,
+      )
+    }
     for (const value of Object.values(node)) {
       if (Array.isArray(value))
         for (const child of value) {
@@ -523,39 +695,134 @@ function inspectBody(
       else if (value && typeof value === 'object' && 'type' in value) pending.push(value)
     }
   }
-  ensure(
-    tree.body.length === 1 && tree.body[0].type === 'ExpressionStatement',
-    'Artifact must contain exactly one registration expression',
-  )
-  const call = tree.body[0].expression
-  ensure(
-    call.type === 'CallExpression' && !call.optional && call.arguments.length === 1,
-    'Invalid registration',
-  )
-  ensure(
-    call.callee.type === 'MemberExpression' &&
-      !call.callee.computed &&
-      !call.callee.optional &&
-      call.callee.object.name === 'CeruPlugin' &&
-      call.callee.property.name === 'define',
-    'Expected CeruPlugin.define',
-  )
-  const registry = astObject(call.arguments[0])
-  ensure(
-    registry.size === 2 && registry.has('modules') && registry.has('resources'),
-    'Registration requires only modules and resources',
-  )
+  let registry: Map<string, Ast>
+  const preamble: string[] = []
+  const functions = new Map<string, Ast>()
+  let sourceFormat: Artifact['sourceFormat'] = 'exports-v2'
+  if (
+    tree.body.length === 1 &&
+    tree.body[0].type === 'ExpressionStatement' &&
+    tree.body[0].expression.type === 'CallExpression'
+  ) {
+    // Compatibility with the original v2 registration container.
+    sourceFormat = 'ceru-plugin-define-v2'
+    const call = tree.body[0].expression
+    ensure(
+      call.arguments.length === 1 &&
+        call.callee.type === 'MemberExpression' &&
+        !call.callee.computed &&
+        !call.callee.optional &&
+        call.callee.object.name === 'CeruPlugin' &&
+        call.callee.property.name === 'define',
+      'Expected CeruPlugin.define',
+    )
+    registry = astObject(call.arguments[0])
+    ensure(
+      registry.size === 2 && registry.has('modules') && registry.has('resources'),
+      'Registration requires only modules and resources',
+    )
+  } else {
+    const exported = new Map<string, Ast>()
+    for (const statement of tree.body) {
+      if (statement.type === 'FunctionDeclaration') {
+        ensure(statement.id?.name && !statement.generator, 'Invalid helper function')
+        functions.set(statement.id.name, statement)
+        preamble.push(body.slice(statement.start, statement.end))
+        continue
+      }
+      if (statement.type === 'VariableDeclaration') {
+        for (const declaration of statement.declarations) {
+          const init = declaration.init
+          const isFunction =
+            init && ['FunctionExpression', 'ArrowFunctionExpression'].includes(init.type)
+          const isRequire =
+            init?.type === 'CallExpression' &&
+            init.callee?.name === 'require' &&
+            init.arguments.length === 1 &&
+            typeof init.arguments[0]?.value === 'string'
+          const isStatic =
+            init && ['Literal', 'ObjectExpression', 'ArrayExpression'].includes(init.type)
+          ensure(
+            isFunction || isRequire || isStatic,
+            'Top-level variables must be static data, functions, or require() imports',
+          )
+          if (isStatic) astJson(init)
+          if (declaration.id.type === 'Identifier' && isFunction)
+            functions.set(declaration.id.name, init)
+        }
+        preamble.push(body.slice(statement.start, statement.end))
+        continue
+      }
+      ensure(statement.type === 'ExpressionStatement', 'Invalid top-level statement')
+      const expression = statement.expression
+      const left = expression.left
+      ensure(
+        expression.type === 'AssignmentExpression' &&
+          expression.operator === '=' &&
+          left.type === 'MemberExpression' &&
+          !left.computed &&
+          left.object.name === 'exports',
+        'Expected exports assignment',
+      )
+      const key = left.property.name
+      ensure(
+        ['modules', 'activate', 'surfaces', 'resources'].includes(key) && !exported.has(key),
+        'Unknown or duplicate export: ' + key,
+      )
+      exported.set(key, expression.right)
+    }
+    const properties: Ast[] = []
+    const addModule = (key: string, node: Ast) =>
+      properties.push({
+        type: 'Property',
+        kind: 'init',
+        computed: false,
+        method: false,
+        shorthand: false,
+        key: { type: 'Literal', value: key },
+        value: node,
+      })
+    if (exported.has('modules'))
+      for (const [key, node] of astObject(exported.get('modules'))) addModule(key, node)
+    if (exported.has('activate')) {
+      ensure(manifest.modules.logic, 'activate requires modules.logic')
+      addModule(manifest.modules.logic.entry, exported.get('activate'))
+    }
+    if (exported.has('surfaces'))
+      for (const [id, node] of astObject(exported.get('surfaces'))) {
+        const surface = manifest.modules.surfaces?.find(
+          (item) => item.id === id && item.kind === 'web',
+        )
+        ensure(surface, 'Unknown visible surface: ' + id)
+        addModule(surface.entry, node)
+      }
+    registry = new Map([
+      ['modules', { type: 'ObjectExpression', properties }],
+      ['resources', exported.get('resources') ?? { type: 'ObjectExpression', properties: [] }],
+    ])
+  }
   const modules: Record<string, string> = Object.create(null)
-  for (const [key, node] of astObject(registry.get('modules'))) {
+  for (const [key, exportedNode] of astObject(registry.get('modules'))) {
+    const node =
+      exportedNode.type === 'Identifier' ? functions.get(exportedNode.name) : exportedNode
+    ensure(node, 'Export references an unknown function')
     ensure(new RegExp(ID).test(key), 'Invalid module id: ' + key)
     ensure(
-      node.type === 'FunctionExpression' &&
+      ['FunctionExpression', 'FunctionDeclaration', 'ArrowFunctionExpression'].includes(
+        node.type,
+      ) &&
         !node.generator &&
-        node.params.length === 1 &&
-        node.params[0].type === 'Identifier',
+        node.params.length <= 1 &&
+        (!node.params.length || node.params[0].type === 'Identifier'),
       'Module must be a function with one context parameter',
     )
-    modules[key] = body.slice(node.start, node.end)
+    modules[key] = preamble.length
+      ? 'async function(ctx) {\n' +
+        preamble.join('\n') +
+        '\nreturn (' +
+        body.slice(exportedNode.start, exportedNode.end) +
+        ')(ctx);\n}'
+      : body.slice(node.start, node.end)
   }
   ensure(Object.keys(modules).length <= 128, 'Too many modules')
   const resources = astJson(registry.get('resources')) as Record<string, Resource>
@@ -598,9 +865,56 @@ function inspectBody(
   for (const provider of manifest.contributes?.providers ?? [])
     if (provider.icon?.kind === 'asset')
       ensure(Object.hasOwn(resources, provider.icon.resource), 'Missing icon resource')
+  for (const style of manifest.contributes?.styles ?? []) {
+    const resource = resources[style.resource]
+    ensure(resource?.type === 'text', 'Style contribution requires a text resource')
+    ensure(
+      !/@import\b|url\s*\(\s*(?!["']?data:)|expression\s*\(|behavior\s*:/i.test(resource.value),
+      'Style contribution cannot load external resources or executable CSS',
+    )
+  }
   for (const entry of Object.keys(modules))
     ensure(declared.has(entry), 'Undeclared module: ' + entry)
-  return { modules, resources }
+  return {
+    modules,
+    resources,
+    sourceFormat,
+    migrationWarnings:
+      sourceFormat === 'ceru-plugin-define-v2'
+        ? ['This plugin uses the legacy CeruPlugin.define container; rebuild it as exports.*.']
+        : [],
+  }
+}
+function legacyCommentArtifact(text: string): ArtifactHeader | undefined {
+  const comment = /^\/\*!([\s\S]*?)\*\//.exec(text)?.[1]
+  if (!comment || !/@name\s+(.+)/.test(comment) || !/@version\s+(.+)/.test(comment)) return
+  const value = (name: string) =>
+    new RegExp('@' + name + '\\s+([^\\r\\n*]+)').exec(comment)?.[1]?.trim() ?? ''
+  const name = value('name')
+  const version = value('version').replace(/^v/, '')
+  const id =
+    value('id') ||
+    'legacy.' +
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+  if (!id || !/^\d+\.\d+\.\d+/.test(version)) return
+  return {
+    formatVersion: 2,
+    syntax: 'js',
+    manifest: {
+      manifestVersion: 2,
+      id,
+      name,
+      version,
+      description: value('description'),
+      author: value('author'),
+      engines: { hostApi: '^2.0.0', logicRuntime: 'legacy-comment@1' },
+      modules: {},
+    },
+    signature: null,
+  }
 }
 export function readArtifact(
   input: Uint8Array | string,
@@ -609,13 +923,53 @@ export function readArtifact(
   const bytes = typeof input === 'string' ? Buffer.from(input) : input
   ensure(bytes.byteLength <= LIMITS.file, 'Artifact exceeds size limit')
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  ensure(text.startsWith(START), 'Missing Ceru v2 static header')
-  const end = text.indexOf(END, START.length)
-  ensure(
-    end > 0 && Buffer.byteLength(text.slice(0, end)) <= LIMITS.header,
-    'Invalid static header boundary',
-  )
-  const header = parseJsonStrict(text.slice(START.length, end)) as ArtifactHeader
+  let header: ArtifactHeader
+  let body: string
+  if (text.startsWith(START)) {
+    const end = text.indexOf(END, START.length)
+    ensure(
+      end > 0 && Buffer.byteLength(text.slice(0, end)) <= LIMITS.header,
+      'Invalid static header boundary',
+    )
+    header = parseJsonStrict(text.slice(START.length, end)) as ArtifactHeader
+    body = text.slice(end + END.length)
+  } else {
+    // Read only JSON-compatible literal metadata. Never run source to display permissions.
+    let offset = 0
+    function assignment(name: string): Ast | undefined {
+      const match = new RegExp('^\\s*exports\\.' + name + '\\s*=\\s*').exec(text.slice(offset))
+      if (!match) return undefined
+      const start = offset + match[0].length
+      const node = parseExpressionAt(text, start, { ecmaVersion: 2022 }) as Ast
+      const tail = text.slice(node.end)
+      const terminated = /^[ \t]*;[ \t]*(?:\r?\n)?/.exec(tail)
+      const asi = /^[ \t]*\r?\n/.exec(tail)
+      ensure(terminated || asi, 'Metadata assignments must end at a statement boundary')
+      offset = node.end + (terminated ?? asi)![0].length
+      ensure(
+        Buffer.byteLength(text.slice(0, offset)) <= LIMITS.header,
+        'Artifact metadata is too large',
+      )
+      return node
+    }
+    const manifestNode = assignment('manifest')
+    if (!manifestNode) {
+      const legacy = legacyCommentArtifact(text)
+      ensure(
+        !legacy,
+        'Legacy comment-header plugins are recognized for migration metadata only; convert them to exports.manifest/exports.activate before installation.',
+      )
+    }
+    ensure(manifestNode, 'Expected exports.manifest = { ... };')
+    const manifest = astJson(manifestNode) as unknown as PluginManifest
+    const packageNode = assignment('package')
+    const metadata = packageNode
+      ? astJson(packageNode)
+      : { formatVersion: 2, syntax: 'js', signature: null }
+    ensure(plain(metadata) && !Object.hasOwn(metadata, 'manifest'), 'Invalid package metadata')
+    header = { ...metadata, manifest } as ArtifactHeader
+    body = text.slice(offset)
+  }
   exactKeys(
     header,
     ['formatVersion', 'syntax', 'manifest', 'signature', 'template', 'delivery'],
@@ -624,7 +978,6 @@ export function readArtifact(
   ensure(header.formatVersion === 2 && header.syntax === 'js', 'Unsupported artifact format/syntax')
   ensure(Object.hasOwn(header, 'signature'), 'Signature field is required')
   validateManifest(header.manifest)
-  const body = text.slice(end + END.length)
   const codeDigest = digest(body)
   let signatureStatus: Artifact['signatureStatus'] = 'unsigned'
   let templateDigest: string | undefined

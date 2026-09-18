@@ -149,6 +149,339 @@
         "contributes": {
           "type": "object",
           "properties": {
+            "menus": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "commandId": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "slot": {
+                    "enum": [
+                      "playlist.import",
+                      "playlist.actions",
+                      "track.actions",
+                      "player.actions",
+                      "search.tools"
+                    ]
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "when": {
+                    "type": "object",
+                    "properties": {
+                      "kinds": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "track",
+                            "playlist"
+                          ]
+                        }
+                      },
+                      "loggedIn": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "slot",
+                  "title",
+                  "commandId"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "homeSections": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "kind": {
+                    "enum": [
+                      "playlists",
+                      "charts",
+                      "custom"
+                    ]
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "providerIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": -1000,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "uiExtensions": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "slot": {
+                    "enum": [
+                      "home.header",
+                      "home.content.before",
+                      "home.content.after",
+                      "search.source-selector.after",
+                      "playlist.header.actions",
+                      "playlist.item.actions",
+                      "player.actions",
+                      "settings.sections"
+                    ]
+                  },
+                  "mode": {
+                    "enum": [
+                      "append",
+                      "prepend",
+                      "wrap",
+                      "replace"
+                    ]
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": -1000,
+                    "maximum": 1000
+                  },
+                  "when": {
+                    "type": "object",
+                    "properties": {
+                      "loggedIn": {
+                        "type": "boolean"
+                      },
+                      "route": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "slot",
+                  "mode",
+                  "view"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "styles": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "resource": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "scope": {
+                    "enum": [
+                      "surface",
+                      "slot",
+                      "application"
+                    ]
+                  },
+                  "slots": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "enum": [
+                        "home.header",
+                        "home.content.before",
+                        "home.content.after",
+                        "search.source-selector.after",
+                        "playlist.header.actions",
+                        "playlist.item.actions",
+                        "player.actions",
+                        "settings.sections"
+                      ]
+                    }
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": -1000,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "id",
+                  "resource",
+                  "scope"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "playlistImporters": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "placeholder": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "id",
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            },
             "providers": {
               "type": "array",
               "maxItems": 64,
@@ -413,7 +746,21 @@
               },
               "name": {
                 "enum": [
+                  "account.profile",
+                  "downloads.manage",
+                  "localMusic.read",
+                  "localMusic.write",
+                  "settings.read",
+                  "settings.write",
+                  "window.control",
+                  "hotkeys.register",
+                  "rooms.read",
+                  "rooms.control",
+                  "ai.use",
+                  "devices.control",
+                  "ui.styles.global",
                   "network.request",
+                  "network.socket",
                   "network.private",
                   "network.discovery",
                   "credentials.use",

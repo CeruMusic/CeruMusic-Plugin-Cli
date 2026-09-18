@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": "https://github.com/CeruMusic/CeruMusic-Plugin-Template",
-  "digest": "sha256:38b4adec63d19fa7d642827faa6d100b8c75a8880a32cfd4a7f0dde6e42e6b22",
+  "digest": "sha256:eb68b7d77e117cdbc4cf8e9fff3b0bc5d99d5aa67d962f5821ebdbb16960c63e",
   "files": [
     "connected-library/js/_gitignore",
     "connected-library/js/.prettierrc.json",
@@ -257,6 +257,7 @@
     "web-surface/js/src/index.js",
     "web-surface/js/src/view.js",
     "web-surface/js/tsconfig.json",
+    "web-surface/js/ui/search-note.css",
     "web-surface/ts/_gitignore",
     "web-surface/ts/.prettierrc.json",
     "web-surface/ts/.vscode/ceru.code-snippets",
@@ -270,6 +271,7 @@
     "web-surface/ts/README.md",
     "web-surface/ts/src/index.ts",
     "web-surface/ts/src/view.ts",
-    "web-surface/ts/tsconfig.json"
+    "web-surface/ts/tsconfig.json",
+    "web-surface/ts/ui/search-note.css"
   ]
 }

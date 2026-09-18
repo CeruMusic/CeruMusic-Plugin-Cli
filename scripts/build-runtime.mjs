@@ -1,7 +1,14 @@
 import { build } from 'esbuild'
-import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, unlink, copyFile } from 'node:fs/promises'
 import { MANIFEST_SCHEMA } from '../packages/issuer/dist/index.js'
 import { HOST_ICON_NAMES } from '../packages/sdk/dist/index.js'
+await copyFile('packages/sdk/src/host-modules.d.ts', 'packages/sdk/dist/host-modules.d.ts')
+const sdkDeclarations = await readFile('packages/sdk/dist/index.d.ts', 'utf8')
+if (!sdkDeclarations.startsWith('/// <reference path="./host-modules.d.ts" />'))
+  await writeFile(
+    'packages/sdk/dist/index.d.ts',
+    '/// <reference path="./host-modules.d.ts" />\n' + sdkDeclarations,
+  )
 await build({
   entryPoints: ['packages/cli/runtime/sandbox.ts'],
   bundle: true,
@@ -12,6 +19,20 @@ await build({
   target: 'es2022',
   minify: true,
   legalComments: 'inline',
+})
+await build({
+  stdin: {
+    contents:
+      "export * from './packages/sdk/src/music.ts'; export * from './packages/sdk/src/permissions.ts';",
+    resolveDir: process.cwd(),
+    loader: 'ts',
+  },
+  bundle: true,
+  outfile: 'packages/cli/assets/core-contracts.js',
+  platform: 'browser',
+  format: 'esm',
+  target: 'es2022',
+  minify: true,
 })
 // Framework production runtimes belong to the plugin, never to the dev Host.
 const catalog = JSON.parse(await readFile('packages/cli/assets/catalog.json', 'utf8'))

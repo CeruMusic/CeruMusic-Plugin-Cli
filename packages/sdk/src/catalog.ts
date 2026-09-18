@@ -30,7 +30,21 @@ export type HostIconName = (typeof HOST_ICON_NAMES)[number]
 export const HOST_ASSET_NAMES = ['app.logo', 'placeholder.cover', 'placeholder.avatar'] as const
 export type HostAssetName = (typeof HOST_ASSET_NAMES)[number]
 export const PERMISSION_NAMES = [
+  'account.profile',
+  'downloads.manage',
+  'localMusic.read',
+  'localMusic.write',
+  'settings.read',
+  'settings.write',
+  'window.control',
+  'hotkeys.register',
+  'rooms.read',
+  'rooms.control',
+  'ai.use',
+  'devices.control',
+  'ui.styles.global',
   'network.request',
+  'network.socket',
   'network.private',
   'network.discovery',
   'credentials.use',
@@ -56,6 +70,24 @@ export const PERMISSION_NAMES = [
   'guests.run',
 ] as const
 export type PermissionName = (typeof PERMISSION_NAMES)[number]
+
+/** Runtime modules available to hand-written plugins without bundling. */
+export const HOST_MODULE_NAMES = [
+  'ceru',
+  '@ceru/http',
+  '@ceru/ui',
+  '@ceru/socket',
+  '@ceru/library',
+  '@ceru/account',
+  '@ceru/player',
+  '@ceru/tools',
+  '@ceru/crypto',
+  '@ceru/compression',
+  '@ceru/encoding',
+  '@ceru/legacy-http',
+  'lodash',
+] as const
+export type HostModuleName = (typeof HOST_MODULE_NAMES)[number]
 export const LODASH_METHODS = [
   'chunk',
   'compact',

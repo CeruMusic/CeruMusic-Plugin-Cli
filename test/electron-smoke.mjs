@@ -54,13 +54,13 @@ await writeFile(
     'export default definePlugin(async (ctx) => {',
     "  ctx.actions.register('hello', async () => { await ctx.ui.notify({key:'hello',level:'info',message:'Hello from real execution'}); return { asset: (await ctx.assets.url('placeholder.cover')).startsWith('data:image/'), icon: (await ctx.icons.url('platform.tx')).startsWith('data:image/svg+xml') } })",
     "  ctx.actions.register('environment', () => { let parentAccess = false; try { parentAccess = !!parent.document.body } catch {} return { node: typeof (globalThis as any).process, parentAccess } })",
-    "  ctx.providers.register('catalog', {",
+    "  ctx.providers.register('catalog', { tracks: {",
     '    async search(request) {',
     "      const titles = ctx.utils.lodash.uniqBy([{title: request.query}, {title: request.query}], 'title')",
-    "      return {items: titles.map((x) => ({ref:{pluginId:ctx.plugin.id,providerId:'catalog',kind:'track',id:'1'},title:x.title,capabilities:[]}))}",
+    "      return {items: titles.map((x) => ({ref:{pluginId:ctx.plugin.id,providerId:'catalog',kind:'track',id:'1'},title:x.title,metadata:{artists:['Smoke Test']},capabilities:[]}))}",
     '    },',
     "    async resolve() { return ctx.playback.failure({code:'RATE_LIMITED',message:'429 demo',recovery:{mode:'await-user',maxWaitMs:1000}}) }",
-    '  })',
+    '  } })',
     '})',
   ].join('\n'),
 )
@@ -297,7 +297,8 @@ try {
     )
     assert.equal(result.result.value, 'standalone')
   }
-  if (template !== 'source') {
+  const hasCounter = ['vue', 'vue-tsx', 'react'].includes(template)
+  if (hasCounter) {
     const buttonText = async (click = false) => {
       const result = await send(
         'Runtime.evaluate',
@@ -341,7 +342,7 @@ try {
           ...(production ? ['release runs without source or Host frameworks'] : ['source maps']),
           'debugger breakpoint',
           'no Node or parent DOM',
-          ...(template !== 'source' ? ['framework counter interaction'] : []),
+          ...(hasCounter ? ['framework counter interaction'] : []),
         ],
       },
       null,

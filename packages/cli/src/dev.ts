@@ -1,7 +1,9 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { watch } from 'node:fs'
-import { createServer, request as httpRequest, type IncomingMessage } from 'node:http'
-import { request as httpsRequest } from 'node:https'
+import { createServer, Agent as HttpAgent, type IncomingMessage } from 'node:http'
+import { Agent as HttpsAgent } from 'node:https'
+import axios from 'axios'
+import { SocketBroker } from './socket-broker.js'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { resolve, relative, dirname } from 'node:path'
@@ -34,20 +36,22 @@ async function waitForDebugger(origin: string, port: number, exited: () => boole
 }
 const privateAddress = (address: string): boolean => {
   const value = address.toLowerCase()
+  if (value.startsWith('::ffff:')) return privateAddress(value.slice('::ffff:'.length))
   if (value.includes(':'))
     return (
       value === '::1' ||
       value.startsWith('fc') ||
       value.startsWith('fd') ||
-      value.startsWith('fe80') ||
-      value.startsWith('::ffff:')
+      value.startsWith('fe80')
     )
   const p = value.split('.').map(Number)
   return (
     p[0] === 0 ||
     p[0] === 10 ||
     p[0] === 127 ||
-    p[0] === 169 ||
+    (p[0] === 169 && p[1] === 254) ||
+    (p[0] === 100 && p[1] >= 64 && p[1] <= 127) ||
+    (p[0] === 198 && (p[1] === 18 || p[1] === 19)) ||
     p[0] >= 224 ||
     (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
     (p[0] === 192 && p[1] === 168)
@@ -63,30 +67,11 @@ async function bodyJson(request: IncomingMessage): Promise<any> {
   }
   return parseJsonStrict(Buffer.concat(chunks).toString('utf8'))
 }
-/** Narrow development broker: exact granted origin, no redirects, pinned DNS, bounded response. */
-async function fetchAllowed(
-  input: any,
-  permission: any,
+async function allowedAddress(
+  url: URL,
   privateAllowed: boolean,
-  binary = false,
-  reservedPorts: number[] = [],
-): Promise<any> {
-  const url = new URL(input.url)
-  if (url.username || url.password || !['http:', 'https:'].includes(url.protocol))
-    throw new Error('Unsupported URL')
-  if (url.origin !== permission.origin) throw new Error('Origin is not granted: ' + url.origin)
-  if (url.protocol === 'http:' && !privateAllowed)
-    throw new Error('HTTP requires a separately granted network.private permission')
-  const method = String(input.method ?? 'GET').toUpperCase()
-  if (!permission.methods.includes(method)) throw new Error('Method is outside the declared scope')
-  if (/%(?:2f|5c)/i.test(url.pathname)) throw new Error('Encoded path separator is not supported')
-  if (
-    !permission.paths.some(
-      (path: string) =>
-        url.pathname === path || url.pathname.startsWith(path.endsWith('/') ? path : path + '/'),
-    )
-  )
-    throw new Error('Path is outside the declared scope')
+  reservedPorts: number[],
+): Promise<{ address: string; family: number }> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
   const addresses = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
@@ -96,15 +81,25 @@ async function fetchAllowed(
     if (
       (address.startsWith('127.') || address === '::1') &&
       reservedPorts.includes(Number(url.port) || (url.protocol === 'https:' ? 443 : 80))
-    ) {
+    )
       throw new Error('Development Host and debugger endpoints are reserved')
-    }
-    if (/^(169\.254\.|fe80:|::ffff:)/i.test(address))
-      throw new Error('Sensitive/link-local address is blocked')
     if (privateAddress(address) && !privateAllowed)
       throw new Error('Private network access is not granted')
   }
-  const chosen = addresses[0]
+  return addresses[0]
+}
+/** Development broker: capability-gated network, private-network split, pinned DNS, bounded response. */
+async function fetchAllowed(
+  input: any,
+  privateAllowed: boolean,
+  reservedPorts: number[] = [],
+  signal?: AbortSignal,
+  redirects = 0,
+): Promise<any> {
+  const url = new URL(input.url)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported URL')
+  const method = String(input.method ?? 'GET').toUpperCase()
+  const chosen = await allowedAddress(url, privateAllowed, reservedPorts)
   const headers: Record<string, string> = { 'Accept-Encoding': 'identity' }
   for (const [name, value] of Object.entries(input.headers ?? {})) {
     if (
@@ -121,52 +116,74 @@ async function fetchAllowed(
     (typeof input.body !== 'string' || Buffer.byteLength(input.body) > 1024 * 1024)
   )
     throw new Error('Invalid request body')
-  return new Promise((resolveResponse, reject) => {
-    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
-      url,
-      {
-        method,
-        headers,
-        lookup: ((_host: string, options: any, callback: any) =>
-          options?.all
-            ? callback(null, [chosen])
-            : callback(null, chosen.address, chosen.family)) as any,
-      },
-      (response) => {
-        const chunks: Buffer[] = []
-        let total = 0
-        response.on('data', (chunk: Buffer) => {
-          total += chunk.length
-          if (total > (binary ? 32 : 2) * 1024 * 1024) {
-            request.destroy(new Error('Response exceeds development limit'))
-            return
-          }
-          chunks.push(chunk)
-        })
-        response.once('error', reject)
-        response.once('end', () => {
-          if (binary) {
-            resolveResponse({
-              status: response.statusCode,
-              headers: response.headers,
-              bytes: Buffer.concat(chunks),
-            })
-            return
-          }
-          const text = Buffer.concat(chunks).toString('utf8')
-          let body: unknown = text
-          try {
-            body = JSON.parse(text)
-          } catch {}
-          resolveResponse({ status: response.statusCode, headers: response.headers, body })
-        })
-      },
+  const pinLookup = ((_host: string, options: any, callback: any) =>
+    options?.all ? callback(null, [chosen]) : callback(null, chosen.address, chosen.family)) as any
+  const httpAgent = new HttpAgent({ lookup: pinLookup })
+  const httpsAgent = new HttpsAgent({ lookup: pinLookup })
+  try {
+    const response = await axios.request<ArrayBuffer>({
+      url: url.href,
+      method,
+      headers,
+      data: input.body,
+      adapter: 'http',
+      httpAgent,
+      httpsAgent,
+      proxy: false,
+      maxRedirects: 0,
+      timeout: Math.max(1000, Math.min(30000, Number(input.timeoutMs) || 15000)),
+      maxContentLength: 2 * 1024 * 1024,
+      maxBodyLength: 1024 * 1024,
+      responseType: 'arraybuffer',
+      validateStatus: () => true,
+      transformResponse: [(data) => data],
+      signal,
+    })
+    const bytes = Buffer.from(response.data)
+    const responseHeaders = Object.fromEntries(
+      Object.entries(response.headers).filter(
+        ([, value]) => value != null && typeof value !== 'function',
+      ),
     )
-    request.setTimeout(15000, () => request.destroy(new Error('HTTP timeout')))
-    request.once('error', reject)
-    request.end(input.body)
-  })
+    if (
+      response.status >= 300 &&
+      response.status < 400 &&
+      typeof responseHeaders.location === 'string'
+    ) {
+      if (redirects >= 5) throw new Error('HTTP redirect limit exceeded')
+      const nextMethod = response.status === 303 ? 'GET' : method
+      return fetchAllowed(
+        {
+          ...input,
+          url: new URL(responseHeaders.location, url).href,
+          method: nextMethod,
+          ...(nextMethod === 'GET' ? { body: undefined } : {}),
+        },
+        privateAllowed,
+        reservedPorts,
+        signal,
+        redirects + 1,
+      )
+    }
+    const text = bytes.toString('utf8')
+    let body: unknown = text
+    try {
+      body = JSON.parse(text)
+    } catch {}
+    return { status: response.status, headers: responseHeaders, body }
+  } catch (error) {
+    // AxiosError includes config/headers: never send it through plugin logs or RPC.
+    throw new Error(
+      axios.isAxiosError(error)
+        ? 'HTTP request failed (' + (error.code || 'NETWORK_ERROR') + ')'
+        : 'HTTP request failed',
+    )
+  } finally {
+    httpAgent.destroy()
+    httpsAgent.destroy()
+  }
 }
+
 export async function runDev(
   project: string,
   options: {
@@ -213,7 +230,7 @@ export async function runDev(
     const parsed = readArtifact(bytes)
     if (Object.keys(parsed.header.manifest.engines.libraries ?? {}).length)
       throw new Error(
-        'This artifact still requires Host frameworks. Rebuild it with CLI 0.1.2 or later.',
+        'This artifact still requires Host frameworks. Rebuild it with CLI 0.2.0 or later.',
       )
     // Serve the verified release functions as scripts inside the same isolated
     // Surface. No project imports, transpiler, or framework is involved here.
@@ -236,9 +253,16 @@ export async function runDev(
   const nonce = randomBytes(24).toString('base64')
   const catalog = JSON.parse(await readFile(asset('catalog.json'), 'utf8'))
   let config: Record<string, unknown> = {}
-  const grants = new Map<string, { origin: string; methods: string[]; paths: string[] }>()
+  try {
+    const configPath = resolve(root, '.ceru-dev/config.json')
+    config = parseJsonStrict(await readFile(configPath, 'utf8'))
+  } catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error
+  }
+  const grants = new Map<string, { name: string }>()
+  const sockets = new SocketBroker()
+  const operations = new Map<string, AbortController>()
   const storage = new Map<string, unknown>()
-  const leases = new Map<string, { url: string; permissionKey: string; expiresAt: number }>()
   const rebuild = async () => {
     if (running) {
       dirty = true
@@ -252,8 +276,10 @@ export async function runDev(
         artifact = readArtifact(await readFile(build.path))
         revision++
         error = null
+        sockets.closeAll()
+        for (const operation of operations.values()) operation.abort()
+        operations.clear()
         grants.clear()
-        leases.clear()
         console.log('Reloaded plugin revision ' + revision)
       } catch (e) {
         error = e instanceof Error ? e.message : String(e)
@@ -308,37 +334,6 @@ export async function runDev(
         })
         return
       }
-      if (url.pathname.startsWith('/media/') && request.method === 'GET') {
-        const lease = leases.get(url.pathname.slice('/media/'.length))
-        const grant = lease && grants.get(lease.permissionKey)
-        if (!lease || !grant || lease.expiresAt < Date.now())
-          throw new Error('Media lease expired or revoked')
-        const privateAllowed =
-          artifact.header.manifest.permissions?.some(
-            (p) => p.name === 'network.private' && grants.get(p.key)?.origin === grant.origin,
-          ) ?? false
-        const media = await fetchAllowed(
-          {
-            url: lease.url,
-            headers: request.headers.range ? { Range: request.headers.range } : {},
-          },
-          grant,
-          privateAllowed,
-          true,
-          [Number(new URL(origin).port), debugPort],
-        )
-        response.writeHead(media.status, {
-          'Content-Type': media.headers['content-type'] || 'application/octet-stream',
-          'Cache-Control': 'no-store',
-          'Content-Length': media.bytes.length,
-          ...(media.headers['content-range']
-            ? { 'Content-Range': media.headers['content-range'] }
-            : {}),
-          'X-Content-Type-Options': 'nosniff',
-        })
-        response.end(media.bytes)
-        return
-      }
       if (url.pathname === '/plugin.js' && ['GET', 'HEAD'].includes(request.method ?? '')) {
         if (error) {
           json(503, { error })
@@ -362,11 +357,16 @@ export async function runDev(
           json(403, { error: 'Invalid development session' })
           return
         }
+        if (url.pathname === '/api/socket-events' && request.method === 'GET') {
+          json(200, { events: sockets.drain() })
+          return
+        }
         if (url.pathname === '/api/state' && request.method === 'GET') {
           json(200, {
             revision,
             error,
             manifest: artifact.header.manifest,
+            migrationWarnings: artifact.migrationWarnings,
             resources: artifact.resources,
             catalog,
             config,
@@ -389,24 +389,68 @@ export async function runDev(
         if (url.pathname === '/api/grant') {
           const declaration = artifact.header.manifest.permissions?.find((p) => p.key === input.key)
           if (!declaration) throw new Error('Permission was not declared')
-          if (!input.allow) grants.delete(input.key)
-          else {
-            const scope = declaration.scope ?? {}
-            const declaredOrigin = scope.origin
-            const chosen = typeof declaredOrigin === 'string' ? declaredOrigin : input.origin
-            if (declaration.name.startsWith('network.') && !chosen)
-              throw new Error('Specify an exact origin')
-            grants.set(input.key, {
-              origin: chosen ? new URL(chosen).origin : '',
-              methods: Array.isArray(scope.methods) ? (scope.methods as string[]) : ['GET', 'POST'],
-              paths: Array.isArray(scope.pathPrefixes) ? (scope.pathPrefixes as string[]) : ['/'],
-            })
+          if (!input.allow) {
+            grants.delete(input.key)
+            sockets.revoke(input.key)
+          } else {
+            grants.set(input.key, { name: declaration.name })
           }
           json(200, { ok: true })
           return
         }
         if (url.pathname === '/api/rpc') {
           const data = input.data ?? {}
+          if (input.method.startsWith('sockets.')) {
+            if (input.method === 'sockets.closeAll') {
+              sockets.closeAll()
+              json(200, { value: null })
+              return
+            }
+            if (input.method === 'sockets.connect') {
+              const declaration = artifact.header.manifest.permissions?.find(
+                (p) => p.key === data.permissionKey && p.name === 'network.socket',
+              )
+              const grant = declaration && grants.get(declaration.key)
+              if (!grant) throw new Error('Socket permission is not granted')
+              const privateAllowed =
+                artifact.header.manifest.permissions?.some(
+                  (permission) =>
+                    permission.name === 'network.private' && grants.has(permission.key),
+                ) ?? false
+              const value = await sockets.connect(data, privateAllowed, [
+                Number(new URL(origin).port),
+                debugPort,
+              ])
+              // A pending handshake must not outlive a revoked grant or plugin reload.
+              if (grants.get(declaration.key) !== grant) {
+                sockets.disconnect(value.id)
+                throw new Error('Socket permission was revoked')
+              }
+              json(200, { value })
+              return
+            }
+            if (input.method === 'sockets.send') {
+              sockets.send(data.id, data.event, data.data)
+              json(200, { value: null })
+              return
+            }
+            if (input.method === 'sockets.disconnect') {
+              sockets.disconnect(data.id)
+              json(200, { value: null })
+              return
+            }
+            throw new Error('Unknown socket method')
+          }
+          if (input.method === 'operations.cancel') {
+            operations.get(String(data.id))?.abort()
+            json(200, { value: null })
+            return
+          }
+          if (input.method.startsWith('library.playlists.')) {
+            throw new Error(
+              '此独立开发 Host 尚未连接澜音的歌单服务。本地歌单和云歌单由澜音管理；请在正式 Host 中调用此能力。开发环境不会创建替代歌单库。',
+            )
+          }
           if (input.method === 'config.get') {
             json(200, { value: config })
             return
@@ -437,20 +481,61 @@ export async function runDev(
             })
             return
           }
-          if (input.method === 'media.createLease') {
-            const declaration = artifact.header.manifest.permissions?.find(
-              (p) => p.key === data.permissionKey && p.name === 'network.request',
-            )
-            const grant = declaration && grants.get(declaration.key)
-            if (!grant || new URL(data.url).origin !== grant.origin)
-              throw new Error('Media origin is not granted')
-            const id = randomBytes(18).toString('hex')
-            leases.set(id, {
-              url: data.url,
-              permissionKey: data.permissionKey,
-              expiresAt: Math.min(Number(data.expiresAt) || Date.now() + 60000, Date.now() + 60000),
+          if (input.method === 'permissions.getGranted') {
+            json(200, {
+              value: (artifact.header.manifest.permissions ?? [])
+                .filter((permission) => grants.has(permission.key))
+                .map((permission) => ({
+                  key: permission.key,
+                  name: permission.name,
+                  scope: permission.scope ?? {},
+                  status: 'granted',
+                })),
             })
-            json(200, { value: { kind: 'media', id } })
+            return
+          }
+          if (input.method === 'services.capabilities.list') {
+            json(200, {
+              value: [
+                'account',
+                'library',
+                'player',
+                'queue',
+                'favorites',
+                'history',
+                'downloads',
+                'files',
+                'clipboard',
+                'localMusic',
+                'settings',
+                'window',
+                'hotkeys',
+                'sharing',
+                'rooms',
+                'devices',
+                'ai',
+                'tasks',
+              ].map((service) => ({
+                service,
+                version: '1.0.0',
+                available: false,
+                reason: 'host-not-connected',
+                permissionGroups: [],
+              })),
+            })
+            return
+          }
+          if (input.method === 'services.capabilities.get') {
+            const service = String(data.args?.[0] ?? '')
+            json(200, {
+              value: {
+                service,
+                version: '1.0.0',
+                available: false,
+                reason: 'host-not-connected',
+                permissionGroups: [],
+              },
+            })
             return
           }
           if (input.method === 'http.request') {
@@ -461,14 +546,23 @@ export async function runDev(
             if (!grant) throw new Error('Network permission is not granted')
             const hasPrivate =
               artifact.header.manifest.permissions?.some(
-                (p) => p.name === 'network.private' && grants.get(p.key)?.origin === grant.origin,
+                (permission) => permission.name === 'network.private' && grants.has(permission.key),
               ) ?? false
-            json(200, {
-              value: await fetchAllowed(data, grant, hasPrivate, false, [
-                Number(new URL(origin).port),
-                debugPort,
-              ]),
-            })
+            const operationId = String(data.operation?.id ?? '')
+            const controller = new AbortController()
+            if (operationId) operations.set(operationId, controller)
+            try {
+              json(200, {
+                value: await fetchAllowed(
+                  data,
+                  hasPrivate,
+                  [Number(new URL(origin).port), debugPort],
+                  controller.signal,
+                ),
+              })
+            } finally {
+              if (operations.get(operationId) === controller) operations.delete(operationId)
+            }
             return
           }
           throw new Error(
@@ -495,7 +589,7 @@ export async function runDev(
           'Content-Security-Policy',
           "default-src 'none'; script-src 'self' 'nonce-" +
             nonce +
-            "'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+            "'; style-src 'self'; img-src 'self' data:; media-src 'self' http: https: data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
         )
       } else if (url.pathname === '/sandbox.html') {
         const moduleId = url.searchParams.get('module') ?? ''
@@ -525,6 +619,7 @@ export async function runDev(
         const file = (
           {
             '/playground.js': 'playground.js',
+            '/core-contracts.js': 'core-contracts.js',
             '/style.css': 'style.css',
             '/sandbox.js': 'sandbox.js',
           } as Record<string, string>
@@ -563,6 +658,8 @@ export async function runDev(
   const address = server.address()
   origin = 'http://127.0.0.1:' + (typeof address === 'object' && address ? address.port : port)
   const close = () => {
+    sockets.closeAll()
+    for (const operation of operations.values()) operation.abort()
     clearTimeout(timer)
     watcher.close()
     electron?.kill()

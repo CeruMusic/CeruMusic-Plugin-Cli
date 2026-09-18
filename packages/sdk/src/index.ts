@@ -1,7 +1,26 @@
+/// <reference path="./host-modules.d.ts" />
 /** This package defines the v2 wire/authoring contract. It does not grant Host permissions. */
 import type { LoDashStatic } from 'lodash'
 import type { HostIconName, HostAssetName, LODASH_METHODS } from './catalog.js'
 export * from './catalog.js'
+export * from './http.js'
+export * from './library.js'
+export * from './sockets.js'
+import type { SocketAPI } from './sockets.js'
+import type { createHttpClient, HttpClientOptions } from './http.js'
+export * from './music.js'
+export * from './permissions.js'
+export * from './services.js'
+export * from './modules.js'
+import type { PluginModules } from './modules.js'
+import type { HostServices, HostUI } from './services.js'
+import type {
+  PermissionGrant,
+  PermissionGroupRequest,
+  PermissionGroupResult,
+} from './permissions.js'
+import type { ChartMetadata, LyricsDocument, PlaylistMetadata, TrackMetadata } from './music.js'
+import type { LibraryAPI, PlaylistImporterImplementation } from './library.js'
 /** 宿主在插件自己的隔离环境提供这些 Lodash 方法；不会打入插件发行文件。 */
 export type HostLodash = Pick<LoDashStatic, (typeof LODASH_METHODS)[number]>
 export * from './manifest.js'
@@ -13,12 +32,15 @@ export interface ResourceRef {
   connectionId?: string
   kind: string
   id: string
+  /** Opaque plugin-owned JSON persisted by the Host and returned only to this plugin. */
+  data?: JsonObject
 }
 export interface AssetHandle {
   readonly kind: 'asset'
   readonly id: string
 }
 export interface MediaLease {
+  /** @deprecated v0.2 providers return direct playback URLs. */
   readonly kind: 'media'
   readonly id: string
 }
@@ -46,6 +68,10 @@ export interface ContentEntity {
   durationMs?: number
   capabilities: string[]
   extensions?: JsonObject
+  /** Standard metadata consumed directly by the Host; never raw platform response objects. */
+  metadata?: TrackMetadata
+  playlist?: PlaylistMetadata
+  chart?: ChartMetadata
 }
 export interface Page<T> {
   items: T[]
@@ -84,27 +110,79 @@ export interface MusicFault {
     )[]
   }
 }
-export type ResolveResult = { ok: true; media: MediaLease } | { ok: false; error: MusicFault }
-export interface ProviderImplementation {
+export type ResolveResult =
+  | { ok: true; url: string; expiresAt?: number }
+  | { ok: false; error: MusicFault }
+export interface TrackProvider {
   search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
   resolve?(
     resource: ResourceRef,
     quality: string | undefined,
     operation: OperationContext,
   ): Promise<ResolveResult>
+  lyrics?(resource: ResourceRef, operation: OperationContext): Promise<LyricsDocument>
+}
+export interface PlaylistProvider {
+  search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
   categories?(operation: OperationContext): Promise<Page<ContentEntity>>
   list?(
     resource: ResourceRef,
     cursor: string | undefined,
     operation: OperationContext,
   ): Promise<Page<ContentEntity>>
+  get?(
+    resource: ResourceRef,
+    cursor: string | undefined,
+    operation: OperationContext,
+  ): Promise<Page<ContentEntity>>
+}
+export interface ChartProvider {
+  list?(operation: OperationContext): Promise<Page<ContentEntity>>
+  getTracks?(
+    resource: ResourceRef,
+    cursor: string | undefined,
+    operation: OperationContext,
+  ): Promise<Page<ContentEntity>>
+}
+export interface SharingProvider {
+  describe?(
+    resource: ResourceRef,
+    policy: JsonObject,
+    operation: OperationContext,
+  ): Promise<JsonObject>
+}
+export interface ProviderImplementation {
+  tracks?: TrackProvider
+  playlists?: PlaylistProvider
+  charts?: ChartProvider
+  sharing?: SharingProvider
+  /** @deprecated Use tracks.lyrics. Kept for v2 preview compatibility. */
+  lyrics?(resource: ResourceRef, operation: OperationContext): Promise<LyricsDocument>
+  /** @deprecated Use tracks.search. */
+  search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
+  /** @deprecated Use tracks.resolve. */
+  resolve?(
+    resource: ResourceRef,
+    quality: string | undefined,
+    operation: OperationContext,
+  ): Promise<ResolveResult>
+  /** @deprecated Use playlists.categories. */
+  categories?(operation: OperationContext): Promise<Page<ContentEntity>>
+  /** @deprecated Use playlists.list/get or charts.getTracks. */
+  list?(
+    resource: ResourceRef,
+    cursor: string | undefined,
+    operation: OperationContext,
+  ): Promise<Page<ContentEntity>>
+  /** @deprecated Use sharing.describe. */
   share?(
     resource: ResourceRef,
     policy: JsonObject,
     operation: OperationContext,
   ): Promise<JsonObject>
 }
-export interface PluginContext {
+export interface PluginContext extends HostServices {
+  modules: PluginModules
   readonly plugin: { id: string; version: string }
   /** 当前 Host 的协议版本与共享资源版本。 */
   readonly host: {
@@ -133,6 +211,13 @@ export interface PluginContext {
   }
   /** 已验证的配置。凭据字段由 Host 替换为引用，不返回主密钥。 */
   config: { get<T extends JsonObject = JsonObject>(): Promise<T> }
+  /** Uses the application's own local/cloud playlists after Host permission checks. */
+  library: LibraryAPI
+  /** Host-provided Socket.IO / WebSocket; no socket library is bundled into the plugin. */
+  sockets: SocketAPI
+  playlistImporters: {
+    register(id: string, implementation: PlaylistImporterImplementation): Disposable
+  }
   providers: { register(id: string, implementation: ProviderImplementation): Disposable }
   actions: {
     register<
@@ -144,6 +229,8 @@ export interface PluginContext {
     ): Disposable
   }
   permissions: {
+    getGranted(): Promise<PermissionGrant[]>
+    requestGroup(request: PermissionGroupRequest): Promise<PermissionGroupResult>
     query(request: { key: string; scope?: JsonObject }): Promise<{ status: PermissionStatus }>
     request(request: {
       key: string
@@ -152,28 +239,30 @@ export interface PluginContext {
     }): Promise<{ status: PermissionStatus }>
   }
   http: {
+    /** Axios-backed Host client with JSON/form helpers and typed results. */
+    create(options: HttpClientOptions): ReturnType<typeof createHttpClient>
     request(request: {
       permissionKey: string
       url: string
       method?: string
       headers?: Record<string, string>
       body?: string
+      timeoutMs?: number
       credential?: CredentialRef
       operation: OperationContext
     }): Promise<{ status: number; headers: Record<string, string>; body: JsonValue }>
   }
   credentials: { get(connectionId: string): Promise<CredentialRef | null> }
-  media: {
-    createLease(request: {
-      permissionKey: string
-      url: string
-      credential?: CredentialRef
-      operation: OperationContext
-      expiresAt?: number
-    }): Promise<MediaLease>
-  }
   playback: { failure(error: MusicFault): ResolveResult }
-  ui: {
+  ui: HostUI & {
+    toast(message: {
+      message: string
+      level?: 'info' | 'success' | 'warning' | 'error'
+    }): Promise<void>
+    /** Opens the application's existing import dialog. This does not create a plugin Surface. */
+    playlistImport: {
+      open(request: { importerId: string; initialValue?: string }): Promise<void>
+    }
     setState(surfaceId: string, state: JsonObject): Promise<void>
     notify(message: {
       key: string
@@ -223,6 +312,11 @@ export type PermissionStatus =
   | 'unavailable'
 export interface SurfaceContext extends Pick<PluginContext, 'host' | 'utils' | 'icons' | 'assets'> {
   readonly root: HTMLElement
+  readonly mount: {
+    kind: 'page' | 'slot'
+    slot?: import('./manifest.js').UISlotName
+    mode?: 'append' | 'prepend' | 'wrap' | 'replace'
+  }
   invoke(action: string, input: JsonValue): Promise<JsonValue>
   subscribe(handler: (state: JsonObject) => void): Disposable
 }
@@ -260,6 +354,7 @@ export type UINode =
     }
   | { type: 'text'; text?: string; label?: string; bind?: string }
   | { type: 'button'; label: string; action: string }
+  | { type: 'host-content' }
   | {
       type: 'text-input' | 'input' | 'number' | 'toggle'
       label: string
