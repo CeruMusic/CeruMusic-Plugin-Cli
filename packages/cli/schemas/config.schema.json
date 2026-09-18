@@ -1,0 +1,610 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ceru Plugin Build Configuration",
+  "type": "object",
+  "properties": {
+    "manifest": {
+      "type": "object",
+      "properties": {
+        "manifestVersion": {
+          "const": 2
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "engines": {
+          "type": "object",
+          "properties": {
+            "hostApi": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "logicRuntime": {
+              "const": "ceru-js@1"
+            },
+            "uiSchema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "libraries": {
+              "type": "object",
+              "properties": {
+                "vue": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "react": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "react-dom": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "hostApi",
+            "logicRuntime"
+          ],
+          "additionalProperties": false
+        },
+        "modules": {
+          "type": "object",
+          "properties": {
+            "logic": {
+              "type": "object",
+              "properties": {
+                "entry": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                },
+                "activation": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "maxItems": 128,
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "entry"
+              ],
+              "additionalProperties": false
+            },
+            "surfaces": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "kind": {
+                    "enum": [
+                      "schema",
+                      "web"
+                    ]
+                  },
+                  "entry": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "entry"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "contributes": {
+          "type": "object",
+          "properties": {
+            "providers": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "protocols": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "connectionMode": {
+                    "enum": [
+                      "none",
+                      "single",
+                      "multiple"
+                    ]
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "protocols"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "commands": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "action": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "action"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sidebarItems": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "group": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "group",
+                  "title",
+                  "view"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "settingsPages": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "view"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "guestAdapters": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "compatibilityProfile": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "bootstrap": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "runtime": {
+                    "const": "ceru-js@1"
+                  },
+                  "projectableProtocols": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "format",
+                  "compatibilityProfile",
+                  "bootstrap",
+                  "runtime",
+                  "projectableProtocols"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "permissions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+              },
+              "name": {
+                "enum": [
+                  "network.request",
+                  "network.private",
+                  "network.discovery",
+                  "credentials.use",
+                  "credentials.read",
+                  "library.read",
+                  "library.write",
+                  "library.delete",
+                  "player.read",
+                  "player.control",
+                  "playback.fallback.hold",
+                  "files.read",
+                  "files.write",
+                  "downloads.create",
+                  "clipboard.read",
+                  "clipboard.write",
+                  "notifications.system",
+                  "external.open",
+                  "background.run",
+                  "services.consume",
+                  "sharing.publish",
+                  "sharing.revoke",
+                  "guests.manage",
+                  "guests.run"
+                ]
+              },
+              "scope": {
+                "type": "object"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "optional": {
+                "type": "boolean"
+              },
+              "requiredFor": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "maxItems": 128,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "key",
+              "name",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "guestPolicy": {
+          "type": "object",
+          "properties": {
+            "maxDepth": {
+              "const": 1
+            },
+            "allowedCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "maxItems": 128,
+              "uniqueItems": true
+            },
+            "networkScopeMode": {
+              "const": "per-guest-user-approved"
+            },
+            "allowNativeCode": {
+              "const": false
+            },
+            "allowRemoteCodeExecution": {
+              "const": false
+            }
+          },
+          "required": [
+            "maxDepth",
+            "allowedCapabilities",
+            "networkScopeMode",
+            "allowNativeCode",
+            "allowRemoteCodeExecution"
+          ],
+          "additionalProperties": false
+        },
+        "dataSchemas": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "config",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "manifestVersion",
+        "id",
+        "name",
+        "version",
+        "engines",
+        "modules"
+      ],
+      "additionalProperties": false
+    },
+    "entries": {
+      "type": "object",
+      "description": "Map stable module IDs to TS/TSX/JS source files",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "json",
+              "text",
+              "base64"
+            ]
+          },
+          "mime": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "string",
+      "default": "dist/plugin.js",
+      "pattern": "\\.(?:js|jsx)$"
+    },
+    "framework": {
+      "enum": [
+        "vanilla",
+        "vue",
+        "react"
+      ],
+      "default": "vanilla"
+    },
+    "sharedLibraries": {
+      "type": "object",
+      "properties": {
+        "vue": {
+          "type": "string"
+        },
+        "react": {
+          "type": "string"
+        },
+        "react-dom": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "webDist": {
+      "type": "object",
+      "description": "Map a Surface entry ID to an already-built local HTML directory",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "manifest",
+    "entries"
+  ],
+  "additionalProperties": false
+}

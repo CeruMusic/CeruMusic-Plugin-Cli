@@ -1,0 +1,10 @@
+node_modules
+**/dist
+packages/cli/assets
+packages/cli/templates
+packages/cli/schemas
+artifacts
+.test-tmp-*
+.electron-smoke-*
+.electron-probe
+docs/design.md

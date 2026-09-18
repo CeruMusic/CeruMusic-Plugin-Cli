@@ -1,0 +1,67 @@
+{
+  "name": "@shiqianjiang/ceru-plugin-cli",
+  "version": "0.1.0",
+  "description": "TypeScript scaffolding, single-file build, watch, validation, signing and issuance for Ceru plugins",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "ceru-plugin": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "schemas",
+    "templates",
+    "README.md",
+    "LICENSE",
+    "ASSET_LICENSE",
+    "NOTICE"
+  ],
+  "license": "MIT AND AGPL-3.0-only",
+  "author": "澜音团队",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@shiqianjiang/ceru-plugin-issuer": "0.1.0",
+    "@babel/core": "^7.29.7",
+    "@vue/babel-plugin-jsx": "^2.0.1",
+    "@vue/compiler-sfc": "3.5.43",
+    "esbuild": "^0.28.2",
+    "lodash-es": "^4.18.1",
+    "parse5": "^8.0.1",
+    "semver": "^7.7.0",
+    "vue": "3.5.43",
+    "vue-tsc": "^3.3.11",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "~5.9.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CeruMusic/CeruMusic-Plugin-Cli.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/CeruMusic/CeruMusic-Plugin-Cli/issues"
+  },
+  "homepage": "https://github.com/CeruMusic/CeruMusic-Plugin-Cli#readme",
+  "keywords": [
+    "ceru-music",
+    "plugin",
+    "typescript",
+    "electron"
+  ]
+}

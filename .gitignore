@@ -1,0 +1,14 @@
+node_modules/
+dist/
+artifacts/
+*.tsbuildinfo
+*.private.pem
+.keys/
+coverage/
+.test-tmp-*
+.electron-smoke-*/
+.electron-probe/
+.npmrc
+.env
+.env.*
+*.pem

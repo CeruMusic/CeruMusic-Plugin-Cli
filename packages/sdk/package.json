@@ -1,0 +1,57 @@
+{
+  "name": "@shiqianjiang/ceru-plugin-sdk",
+  "version": "0.1.0",
+  "description": "Typed authoring contracts for Ceru Music v2 single-file plugins",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "default": "./dist/manifest.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog.d.ts",
+      "import": "./dist/catalog.js",
+      "default": "./dist/catalog.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@types/lodash": "^4.17.25"
+  },
+  "author": "澜音团队",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CeruMusic/CeruMusic-Plugin-Cli.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/CeruMusic/CeruMusic-Plugin-Cli/issues"
+  },
+  "homepage": "https://github.com/CeruMusic/CeruMusic-Plugin-Cli#readme",
+  "keywords": [
+    "ceru-music",
+    "plugin",
+    "typescript",
+    "electron"
+  ]
+}

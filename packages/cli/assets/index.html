@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Ceru Plugin Dev</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <span class="badge">CERU / DEV HOST</span>
+        <h1 id="plugin-name">插件调试工作台</h1>
+        <p id="plugin-meta">TypeScript · 单文件构建 · 隔离运行</p>
+      </div>
+      <div class="header-actions">
+        <span id="status" class="status">启动中</span><button id="restart">重新运行</button
+        ><button id="stop">停止</button>
+      </div>
+    </header>
+    <div id="build-error" class="error hidden"></div>
+    <main>
+      <aside>
+        <section>
+          <h2>能力注册</h2>
+          <div id="registrations"></div>
+        </section>
+        <section>
+          <h2>界面与兼容模块</h2>
+          <div id="views"></div>
+        </section>
+        <section>
+          <h2>运行时配置</h2>
+          <p class="hint">仅保存在当前开发会话中。</p>
+          <textarea id="config" spellcheck="false">{}</textarea
+          ><button id="apply-config">应用配置并重载</button>
+        </section>
+        <section>
+          <h2>权限模拟</h2>
+          <div id="permissions"></div>
+        </section>
+      </aside>
+      <article>
+        <section>
+          <h2>搜索与解析</h2>
+          <div class="row">
+            <select id="provider"></select
+            ><input id="query" placeholder="输入关键词" /><button id="search" class="primary">
+              调用搜索</button
+            ><button id="cancel">取消调用</button>
+          </div>
+          <div id="results" class="results">
+            <div class="empty">插件启动后可以调用已注册的搜索方法。</div>
+          </div>
+          <pre id="result-detail"></pre>
+        </section>
+        <section>
+          <h2>界面预览</h2>
+          <div id="preview" class="preview"><div class="empty">选择左侧的页面。</div></div>
+        </section>
+        <section>
+          <h2>宿主资源</h2>
+          <p class="hint">
+            平台图标可直接写入 Manifest：<code>icon: { kind: 'host', name: 'platform.tx' }</code>
+          </p>
+          <div id="icons" class="icons"></div>
+          <div id="static-assets" class="static-assets"></div>
+          <p class="hint">工具：<code>ctx.utils.lodash</code> · 64 个带类型提示的常用方法</p>
+        </section>
+      </article>
+      <section class="log-column">
+        <div class="row">
+          <h2>运行日志</h2>
+          <button id="clear-log">清空</button>
+        </div>
+        <p class="hint">
+          使用 VS Code 的 “Attach to Ceru plugin” 或 Electron DevTools 调试 TS
+          源码。日志已对常见敏感字段脱敏。
+        </p>
+        <div id="logs"></div>
+      </section>
+    </main>
+    <div id="runners" class="hidden"></div>
+    <footer>
+      这是开发 Host。实际运行逻辑与界面；网络默认拒绝。生产安装授权、凭据保险箱、Guest
+      安装及完整音乐业务仍由正式 Host 实现。
+    </footer>
+    <script nonce="{{NONCE}}">
+      window.CERU_DEV_TOKEN={{TOKEN}};
+    </script>
+    <script src="/playground.js"></script>
+  </body>
+</html>
