@@ -14,6 +14,14 @@ Manifest 仍声明细粒度权限 key，安装与运行时按用户能理解的�
 
 CLI 不是运行时依赖。手写文件直接导出 `exports.manifest`、`exports.activate` 和 `exports.surfaces`，并可使用字面量 `require()` 加载 Host 模块：`ceru`、`@ceru/http`、`@ceru/ui`、`@ceru/socket`、`@ceru/library`、`@ceru/account`、`@ceru/player`、`@ceru/tools`、`@ceru/crypto`、`@ceru/compression`、`@ceru/encoding`、`@ceru/legacy-http`、`lodash`。
 
+## 配置
+
+- `exports.manifest.config` 是构建期默认配置，只允许 JSON 兼容对象。
+- `ctx.config.get<T>()` 返回默认配置、签名交付配置与本地开发覆盖值递归合并后的只读对象。
+- 后端动态发行使用 `personalization.config`，不改写逻辑 bundle；模板策略默认按构建配置的字段和类型生成。
+- `personalization.display` 可覆盖用户看到的名称、描述和作者；插件 ID、版本、权限与贡献点不可由交付配置修改。
+- `ceru.plugin.json` 支持内联 `config`，也支持 `@./config.ts` 引用；引用只在构建期执行并展开，发行文件中不保留路径或模块依赖。
+
 手写发行文件不能直接 require npm 包。CLI 或其他 bundler 必须把第三方依赖及本地模块放进同一个 JS。动态 require 和未知 Host 模块会被拒绝；Core 不读取插件作者或用户机器上的 `node_modules`。
 
 ## 数据边界

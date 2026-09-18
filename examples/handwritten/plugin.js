@@ -18,10 +18,15 @@ exports.manifest = {
   },
   permissions: [],
   dataSchemas: { config: 1, state: 1 },
+  config: {
+    title: '一个 JS 文件就能开发澜音插件',
+  },
 }
 
 exports.activate = async function (core) {
+  const config = await core.config.get()
   const ui = require('@ceru/ui')
+  core.log.info('Hand-written config loaded', { title: config.title })
 
   core.effects.add(
     core.actions.register('hello.open', async function () {

@@ -77,6 +77,8 @@ export interface PluginManifest {
   author?: string
   publisher?: string
   license?: string
+  /** Static defaults for ctx.config. Build-time @file sugar is expanded into this object. */
+  config?: JsonObject
   engines: {
     hostApi: string
     logicRuntime: string

@@ -21,4 +21,6 @@ const icon = hostIcon('platform.tx')
 
 CLI 并非必需。插件也可以直接写成 `exports.manifest`、`exports.activate`、`exports.surfaces` 的单个 JavaScript 文件，通过 `require('@ceru/http')` 等内置模块使用相同能力。第三方 npm 包必须在发行前打入文件。
 
+运行配置通过 `await ctx.config.get<PluginConfig>()` 读取。配置默认值来自静态 `exports.manifest.config`，个性化发行值来自签名后的 `personalization.config`；Host 递归合并后再交给插件。`definePluginConfig()` 可为外部 TS/JS 配置保留完整字段提示。
+
 [完整指南与示例](https://github.com/CeruMusic/CeruMusic-Plugin-Cli#readme)

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": "https://github.com/CeruMusic/CeruMusic-Plugin-Template",
-  "digest": "sha256:308f31d2baae9aa429ea40ae85ea86926e263c445f588d34b7db52b8bd3a8656",
+  "digest": "sha256:1d272f9254f1249079611b29f59837e3277de70d40c911da207bdd935258f415",
   "files": [
     "connected-library/js/_gitignore",
     "connected-library/js/.prettierrc.json",
@@ -131,7 +131,6 @@
     "source/js/package.json",
     "source/js/README.md",
     "source/js/src/index.js",
-    "source/js/src/plugin.config.js",
     "source/js/tsconfig.json",
     "source/ts/_gitignore",
     "source/ts/.prettierrc.json",
@@ -145,7 +144,6 @@
     "source/ts/package.json",
     "source/ts/README.md",
     "source/ts/src/index.ts",
-    "source/ts/src/plugin.config.ts",
     "source/ts/tsconfig.json",
     "vue-tsx/js/_gitignore",
     "vue-tsx/js/.prettierrc.json",

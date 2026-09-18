@@ -4,7 +4,7 @@
   "description": "Create a TypeScript Ceru Music v2 plugin that builds to one JavaScript file",
   "type": "module",
   "bin": {
-    "create-ceru-plugin": "./dist/bin.js"
+    "create-ceru-plugin": "dist/bin.js"
   },
   "files": [
     "dist",

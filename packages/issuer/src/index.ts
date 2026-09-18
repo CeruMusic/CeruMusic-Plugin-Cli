@@ -53,7 +53,6 @@ export interface ArtifactHeader {
   formatVersion: 2
   syntax: 'js'
   manifest: PluginManifest
-  config?: JsonObject
   signature: Proof | null
   template?: TemplateDeclaration
   delivery?: Delivery
@@ -196,6 +195,7 @@ export const MANIFEST_SCHEMA = object(
     author: string,
     publisher: string,
     license: string,
+    config: { type: 'object', additionalProperties: true },
     engines: object(
       {
         hostApi: string,
@@ -540,16 +540,18 @@ function checkProof(proof: Proof, data: Uint8Array): void {
   )
 }
 export function encodeHeader(header: ArtifactHeader): Buffer {
-  const { manifest, config, ...metadata } = header
+  const { manifest, ...metadata } = header
+  const literal = (value: unknown) =>
+    JSON.stringify(value, null, 2).replace(
+      /^(\s*)"([A-Za-z_$][A-Za-z0-9_$]*)":/gm,
+      '$1$2:',
+    )
   const head = Buffer.from(
     'exports.manifest = ' +
-      JSON.stringify(manifest, null, 2) +
+      literal(manifest) +
       ';\n' +
-      (config === undefined
-        ? ''
-        : 'exports.config = ' + JSON.stringify(config, null, 2) + ';\n') +
       'exports.package = ' +
-      JSON.stringify(metadata, null, 2) +
+      literal(metadata) +
       ';\n',
   )
   ensure(head.length <= LIMITS.header, 'Artifact metadata is too large')
@@ -584,7 +586,32 @@ export function resolveArtifactConfig(header: ArtifactHeader): JsonObject {
   const override = plain(config)
     ? (config as JsonObject)
     : Object.create(null)
-  return mergeConfig(header.config ?? Object.create(null), override)
+  return mergeConfig(header.manifest.config ?? Object.create(null), override)
+}
+
+/** Returns customer-facing metadata without changing plugin identity or permissions. */
+export function resolveArtifactDisplay(header: ArtifactHeader): {
+  name: string
+  description?: string
+  author?: string
+} {
+  const personalization = header.delivery?.payload.personalization
+  const display = plain(personalization) && plain((personalization as JsonObject).display)
+    ? ((personalization as JsonObject).display as JsonObject)
+    : Object.create(null)
+  return {
+    name: typeof display.name === 'string' ? display.name : header.manifest.name,
+    ...(typeof display.description === 'string'
+      ? { description: display.description }
+      : header.manifest.description
+        ? { description: header.manifest.description }
+        : {}),
+    ...(typeof display.author === 'string'
+      ? { author: display.author }
+      : header.manifest.author
+        ? { author: header.manifest.author }
+        : {}),
+  }
 }
 
 function checkPolicy(schema: unknown, depth = 0): void {
@@ -640,6 +667,7 @@ export const DEFAULT_PERSONALIZATION_SCHEMA: JsonObject = {
       properties: {
         name: { type: 'string', minLength: 1, maxLength: 120 },
         description: { type: 'string', maxLength: 1024 },
+        author: { type: 'string', maxLength: 120 },
       },
       additionalProperties: false,
     },
@@ -1020,31 +1048,22 @@ export function readArtifact(
     }
     ensure(manifestNode, 'Expected exports.manifest = { ... };')
     const manifest = astJson(manifestNode) as unknown as PluginManifest
-    const configNode = assignment('config')
     const packageNode = assignment('package')
     const metadata = packageNode
       ? astJson(packageNode)
       : { formatVersion: 2, syntax: 'js', signature: null }
     ensure(plain(metadata) && !Object.hasOwn(metadata, 'manifest'), 'Invalid package metadata')
-    header = {
-      ...metadata,
-      manifest,
-      ...(configNode ? { config: astJson(configNode) as JsonObject } : {}),
-    } as ArtifactHeader
+    header = { ...metadata, manifest } as ArtifactHeader
     body = text.slice(offset)
   }
   exactKeys(
     header,
-    ['formatVersion', 'syntax', 'manifest', 'config', 'signature', 'template', 'delivery'],
+    ['formatVersion', 'syntax', 'manifest', 'signature', 'template', 'delivery'],
     'header',
   )
   ensure(header.formatVersion === 2 && header.syntax === 'js', 'Unsupported artifact format/syntax')
   ensure(Object.hasOwn(header, 'signature'), 'Signature field is required')
   validateManifest(header.manifest)
-  if (header.config !== undefined) {
-    ensure(plain(header.config), 'Plugin config must be an object')
-    canonical(header.config)
-  }
   const codeDigest = digest(body)
   let signatureStatus: Artifact['signatureStatus'] = 'unsigned'
   let templateDigest: string | undefined
@@ -1145,7 +1164,7 @@ export function createTemplate(
   ensure(!artifact.header.template, 'Input must be a normal plugin artifact')
   const key = createPrivateKey(options.privateKey)
   const policy =
-    options.personalizationSchema ?? createPersonalizationSchema(artifact.header.config)
+    options.personalizationSchema ?? createPersonalizationSchema(artifact.header.manifest.config)
   policyValidator(policy)
   ensure(
     options.issuerPublicKeys.length > 0 && options.issuerPublicKeys.length <= 16,

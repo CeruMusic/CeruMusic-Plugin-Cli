@@ -106,12 +106,11 @@ async function resolveConfigValue(
   throw new Error('Plugin config must contain only JSON-compatible values')
 }
 
-async function loadPluginConfig(root: string, value: unknown): Promise<JsonObject | undefined> {
+function validatePluginConfig(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined
-  const resolved = await resolveConfigValue(root, value)
-  if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved))
+  if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Plugin config root must resolve to an object')
-  return parseJsonStrict(canonical(resolved)) as JsonObject
+  return parseJsonStrict(canonical(value)) as JsonObject
 }
 
 function configType(value: JsonValue, depth = 0): string {
@@ -186,7 +185,11 @@ async function inside(root: string, path: string): Promise<string> {
 }
 export async function loadProject(project: string): Promise<{ root: string; config: BuildConfig }> {
   const root = await realpath(resolve(project))
-  const raw = parseJsonStrict(await readFile(resolve(root, 'ceru.plugin.json'), 'utf8'))
+  const source = parseJsonStrict(await readFile(resolve(root, 'ceru.plugin.json'), 'utf8'))
+  const expanded = await resolveConfigValue(root, source)
+  if (!expanded || typeof expanded !== 'object' || Array.isArray(expanded))
+    throw new Error('ceru.plugin.json must resolve to an object')
+  const raw = expanded as Record<string, any>
   for (const key of Object.keys(raw))
     if (
       ![
@@ -205,7 +208,10 @@ export async function loadProject(project: string): Promise<{ root: string; conf
   // Older scaffolds declared Host-provided Vue/React. Always migrate their output
   // to standalone bundles, without requiring authors to rewrite their source.
   if (raw.manifest?.engines) delete raw.manifest.engines.libraries
-  raw.config = await loadPluginConfig(root, raw.config)
+  if (raw.config !== undefined && raw.manifest?.config !== undefined)
+    throw new Error('Define config either at the project root or manifest.config, not both')
+  raw.config = validatePluginConfig(raw.config ?? raw.manifest?.config)
+  if (raw.config !== undefined) raw.manifest.config = raw.config
   if (raw.framework && !['vanilla', 'vue', 'react'].includes(raw.framework))
     throw new Error('Unsupported framework')
   validateManifest(raw.manifest)
@@ -216,7 +222,7 @@ export async function loadProject(project: string): Promise<{ root: string; conf
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(id) || typeof path !== 'string')
       throw new Error('Invalid module entry: ' + id)
   }
-  return { root, config: raw }
+  return { root, config: raw as unknown as BuildConfig }
 }
 function checkTypes(root: string, extraFiles: string[] = []): ts.Program {
   const path = resolve(root, 'tsconfig.json')
@@ -478,7 +484,6 @@ export async function buildProject(
     formatVersion: 2,
     syntax: 'js',
     manifest: config.manifest,
-    ...(config.config ? { config: config.config } : {}),
     signature: null,
   }
   const artifact = encodeArtifact(header, body.join('\n') + '\n')

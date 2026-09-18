@@ -21,4 +21,6 @@ console.log(readArtifact(bytes).signatureStatus)
 
 0.2.0 静态读取 `exports.manifest` / `exports.package`，并从 `exports.activate`、`exports.surfaces`、`exports.modules` 提取运行入口。旧 `CeruPlugin.define()` v2 容器仍可验证，但会返回迁移提示；v1 注释头只用于识别迁移来源，不能绕过 v2 Manifest 和权限模型直接运行。
 
+`exports.manifest.config` 是同样可静态读取的 JSON 兼容对象。`createTemplate()` 默认从配置字段和类型生成 `personalization.config` 策略；`PreparedIssuer` 只能覆盖该策略允许的配置。`resolveArtifactConfig()` 递归合并清单默认值与签名交付值，业务代码与后端无需改写 bundle。
+
 [完整协议与命令](https://github.com/CeruMusic/CeruMusic-Plugin-Cli#readme)

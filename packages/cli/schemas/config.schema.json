@@ -46,6 +46,10 @@
           "minLength": 1,
           "maxLength": 4096
         },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "engines": {
           "type": "object",
           "properties": {

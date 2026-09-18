@@ -99,6 +99,10 @@ test('JavaScript authoring also builds', async () => {
 test('inline and referenced plugin config become one static object', async () => {
   const root = await fixture('config-reference')
   await writeFile(
+    join(root, 'src/commands.json'),
+    JSON.stringify([{ id: 'hello', title: 'Hello', action: 'hello' }]),
+  )
+  await writeFile(
     join(root, 'src/plugin.config.ts'),
     [
       "import { definePluginConfig } from '@shiqianjiang/ceru-plugin-sdk'",
@@ -108,7 +112,9 @@ test('inline and referenced plugin config become one static object', async () =>
   )
   const file = join(root, 'ceru.plugin.json')
   const config = JSON.parse(await readFile(file, 'utf8'))
+  config.manifest.contributes.commands = '@./src/commands.json'
   config.config = {
+    displayName: 'Config Test',
     apiOrigin: 'https://source.example.com',
     sources: '@./src/plugin.config.ts',
     literalAt: '@@customer-name',
@@ -116,22 +122,34 @@ test('inline and referenced plugin config become one static object', async () =>
   await writeFile(file, JSON.stringify(config, null, 2))
   const built = await buildProject(root)
   const artifact = readArtifact(await readFile(built.path))
-  assert.deepEqual(JSON.parse(JSON.stringify(artifact.header.config)), {
+  assert.deepEqual(JSON.parse(JSON.stringify(artifact.header.manifest.config)), {
+    displayName: 'Config Test',
     apiOrigin: 'https://source.example.com',
     sources: { kg: { name: '酷狗', qualities: ['320k', 'flac'] } },
     literalAt: '@customer-name',
   })
-  assert.match(artifact.body === '' ? '' : await readFile(built.path, 'utf8'), /exports\.config = \{/)
+  assert.deepEqual(JSON.parse(JSON.stringify(artifact.header.manifest.contributes.commands)), [
+    { id: 'hello', title: 'Hello', action: 'hello' },
+  ])
+  assert.doesNotMatch(await readFile(built.path, 'utf8'), /exports\.config\s*=/)
+  assert.match(await readFile(built.path, 'utf8'), /\n\s+apiOrigin: "https:\/\/source\.example\.com"/)
   assert.doesNotMatch(await readFile(built.path, 'utf8'), /@\.\/src\/plugin\.config\.ts/)
+  const generatedTypes = await readFile(
+    join(root, '.ceru-dev/types/plugin-config.d.ts'),
+    'utf8',
+  )
+  assert.match(generatedTypes, /declare module '@ceru\/plugin-config'/)
+  assert.match(generatedTypes, /readonly "apiOrigin": string/)
 })
 test('delivery config recursively overrides build defaults', () => {
   const header = {
     formatVersion: 2,
     syntax: 'js',
-    manifest: fixtures.get('source').artifact.header.manifest,
-    config: {
-      apiOrigin: 'https://default.example.com',
-      sources: { kg: { qualities: ['320k'] }, wy: { qualities: ['flac'] } },
+    manifest: {
+      config: {
+        apiOrigin: 'https://default.example.com',
+        sources: { kg: { qualities: ['320k'] }, wy: { qualities: ['flac'] } },
+      },
     },
     signature: null,
     delivery: {
