@@ -3,14 +3,16 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, cp, writeFile, readFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { scaffoldProject } from '../packages/cli/dist/index.js'
+import { scaffoldProject, buildProject } from '../packages/cli/dist/index.js'
+import { readArtifact } from '../packages/issuer/dist/index.js'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const temp = await realpath(await mkdtemp(join(root, '.electron-smoke-')))
 const project = join(temp, 'plugin')
 const template = process.argv[3] || 'source'
+const production = process.argv[4] === 'release'
 await scaffoldProject(project, { template })
 const sdk = join(project, 'node_modules/@shiqianjiang/ceru-plugin-sdk')
 await mkdir(sdk, { recursive: true })
@@ -40,6 +42,11 @@ manifest.manifest.contributes.providers ||= [
 ]
 manifest.manifest.contributes.providers[0].icon.name = 'platform.tx'
 await writeFile(join(project, 'ceru.plugin.json'), JSON.stringify(manifest, null, 2))
+if (template === 'react') {
+  const view = join(project, 'src/view.tsx')
+  await writeFile(view, "import './demo.css'\n" + (await readFile(view, 'utf8')))
+  await writeFile(join(project, 'src/demo.css'), 'main { --ceru-css-test: standalone; }')
+}
 await writeFile(
   join(project, 'src/index.ts'),
   [
@@ -68,13 +75,24 @@ if (template === 'source')
 const electron = process.argv[2]
 if (!electron) throw new Error('Pass an Electron executable path')
 const debugPort = Number(process.env.CERU_SMOKE_DEBUG_PORT || 9337)
+let launchArgs = ['dev', '--project', project]
+if (production) {
+  const built = await buildProject(project)
+  const artifact = readArtifact(await readFile(built.path))
+  assert.equal(artifact.header.manifest.engines.libraries, undefined)
+  assert.ok(!artifact.body.includes('__ceruSharedRequire'))
+  const delivery = join(temp, 'delivery')
+  await mkdir(delivery)
+  const file = join(delivery, 'plugin.js')
+  await cp(built.path, file)
+  // This directory has no source, project manifest, Vue or React package.
+  launchArgs = ['preview', file, '--project', delivery]
+}
 const child = spawn(
   process.execPath,
   [
     join(root, 'packages/cli/dist/bin.js'),
-    'dev',
-    '--project',
-    project,
+    ...launchArgs,
     '--port',
     '0',
     '--debug-port',
@@ -123,6 +141,26 @@ try {
   const url = await waitFor(
     () => output.match(/Dev playground: (http:\/\/127\.0\.0\.1:\d+\/)/)?.[1],
   )
+  await waitFor(() => output.includes('CERU_DEBUG_READY '))
+  if (!production) {
+    const reused = spawnSync(
+      process.execPath,
+      [
+        join(root, 'packages/cli/dist/bin.js'),
+        'dev',
+        '--project',
+        project,
+        '--ensure-running',
+        '--port',
+        new URL(url).port,
+        '--debug-port',
+        String(debugPort),
+      ],
+      { encoding: 'utf8', timeout: 20000 },
+    )
+    assert.equal(reused.status, 0, reused.stderr)
+    assert.ok(reused.stdout.includes('Reusing existing'))
+  }
   const target = await waitFor(async () =>
     (await (await fetch('http://127.0.0.1:' + debugPort + '/json/list')).json()).find(
       (t) => t.type === 'page' && t.url.startsWith(url),
@@ -183,10 +221,12 @@ try {
     parentAccess: false,
   })
   const script = await waitFor(() => scripts.find((s) => s.url.includes('/modules/logic.main.js')))
-  assert.ok(script.sourceMapURL?.startsWith('data:'))
-  const map = JSON.parse(Buffer.from(script.sourceMapURL.split(',')[1], 'base64').toString())
-  assert.equal(map.sourceRoot, 'ceru:///')
-  assert.ok(map.sources.some((s) => s.endsWith('src/index.ts')))
+  if (!production) {
+    assert.ok(script.sourceMapURL?.startsWith('data:'))
+    const map = JSON.parse(Buffer.from(script.sourceMapURL.split(',')[1], 'base64').toString())
+    assert.equal(map.sourceRoot, 'ceru:///')
+    assert.ok(map.sources.some((s) => s.endsWith('src/index.ts')))
+  } else assert.ok(!script.sourceMapURL)
   const source = await send(
     'Debugger.getScriptSource',
     { scriptId: script.scriptId },
@@ -227,6 +267,36 @@ try {
   const viewScript = await waitFor(() =>
     scripts.find((s) => s.url.includes('/modules/view.main.js')),
   )
+  const globals = await send(
+    'Runtime.evaluate',
+    {
+      contextId: viewScript.executionContextId,
+      expression:
+        '({ vue: typeof globalThis.Vue, react: typeof globalThis.React, sharedLoader: typeof globalThis.__ceruSharedRequire })',
+      returnByValue: true,
+    },
+    viewScript.sessionId,
+  )
+  assert.deepEqual(globals.result.value, {
+    vue: 'undefined',
+    react: 'undefined',
+    sharedLoader: 'undefined',
+  })
+  assert.equal((await fetch(new URL('/shared/vue.js', url))).status, 404)
+  assert.equal((await fetch(new URL('/shared/react.js', url))).status, 404)
+  if (template === 'react') {
+    const result = await send(
+      'Runtime.evaluate',
+      {
+        contextId: viewScript.executionContextId,
+        expression:
+          "getComputedStyle(document.querySelector('main')).getPropertyValue('--ceru-css-test').trim()",
+        returnByValue: true,
+      },
+      viewScript.sessionId,
+    )
+    assert.equal(result.result.value, 'standalone')
+  }
   if (template !== 'source') {
     const buttonText = async (click = false) => {
       const result = await send(
@@ -257,6 +327,7 @@ try {
       {
         passed: true,
         template,
+        mode: production ? 'release artifact only' : 'development',
         project,
         screenshot: imagePath,
         checks: [
@@ -267,7 +338,7 @@ try {
           'search',
           'resolve',
           'isolated Web Surface',
-          'source maps',
+          ...(production ? ['release runs without source or Host frameworks'] : ['source maps']),
           'debugger breakpoint',
           'no Node or parent DOM',
           ...(template !== 'source' ? ['framework counter interaction'] : []),

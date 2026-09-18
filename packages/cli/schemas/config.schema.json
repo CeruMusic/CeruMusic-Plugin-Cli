@@ -580,6 +580,8 @@
       "default": "vanilla"
     },
     "sharedLibraries": {
+      "deprecated": true,
+      "description": "Legacy field ignored since 0.1.2. Vue and React production runtimes are bundled into the plugin.",
       "type": "object",
       "properties": {
         "vue": {

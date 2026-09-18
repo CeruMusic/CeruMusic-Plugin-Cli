@@ -22,6 +22,10 @@ ceru-plugin sign dist/plugin.js --key .keys/publisher.private.pem
 
 最终交付单个 JS；也可选择 .jsx 后缀，内容仍为完成编译的 JavaScript。编译器、node_modules 和开发服务器不进入产物。
 
+0.1.2 起 Vue/React 生产运行代码也直接打入发行文件，不依赖宿主提供框架。执行 ceru-plugin preview dist/plugin.js 可以只加载最终文件验证页面。
+
+在多根/父目录工作区中，请打开生成的 ceru-plugin.code-workspace 或把插件工程本身加入工作区。已经运行 dev 时选择 Attach to Ceru plugin；Launch 会启动或复用当前项目的 Host。
+
 当前 v1 Host 不能直接安装 v2 产物。开发工作台不代替生产凭据保险箱、完整音乐业务或 Guest 安装。
 
 源码 MIT；复用的预览图标/图片保留原项目 AGPL-3.0-only，见 ASSET_LICENSE 和 NOTICE。

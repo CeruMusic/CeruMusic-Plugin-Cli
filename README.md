@@ -4,7 +4,7 @@
 
 这是 v2 协议的开发工具链。调试工作台会实际运行插件；当前音乐软件的 v1 Host 不能直接安装 v2 产物，正式桌面 Host 需要实现对应协议。
 
-v0.1.0 已发布到 npm。也可以从源码运行：npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
+也可以从源码运行：npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
 
 ## 快速开始
 
@@ -50,9 +50,11 @@ npm run validate
 
 .vue、TSX/JSX 在开发机编译为 JavaScript。CSS、声明式界面与静态资源一起封装；安装时在独立 Surface 中挂载，不把第三方组件插入可信的主界面组件树。
 
-Vue/React 模板默认声明共享的宿主生产运行时。它们在插件自己的隔离环境中加载，不共享主界面的可变对象。希望把生产运行时也包含在文件中时，将配置的 sharedLibraries 改为 {}。
+从 0.1.2 开始，Vue/React 的生产运行代码直接打入每个插件的页面入口，与模板编译结果、样式和资源一起交付。宿主不提供 Vue/React，不需要 npm 依赖、CDN 或额外框架文件。旧工程的 sharedLibraries 配置会在构建时兼容处理，不再生成宿主框架依赖。
 
-两种方式都不会把 node_modules、TypeScript 编译器、Vue SFC 编译器、开发服务器或 npm 工程交给插件用户。
+发行文件不会把 node_modules、TypeScript 编译器、Vue SFC 编译器、开发服务器或 npm 工程交给插件用户。
+
+使用 npm run build 后，再运行 ceru-plugin preview dist/plugin.js：预览只读取发行文件，不访问源码工程，不注入 Vue/React。Vue 组件不可能在没有任何运行代码的情况下工作；这里把所需生产运行代码编成了文件内部的普通 JavaScript，而不是把开发环境带给用户。
 
 已有网页产物可使用 web-dist 模板。当前支持本地静态 HTML、模块脚本、CSS 和普通图片/字体；远端脚本、HTML 内联事件、srcset 与依赖独立运行服务器的页面不属于该模式。
 
@@ -60,6 +62,8 @@ Vue/React 模板默认声明共享的宿主生产运行时。它们在插件自�
 
 - VS Code 自带启动/附加调试配置、后台任务、JSON Schema 关联和代码片段。
 - 按 F5 选择 Launch Ceru plugin；已启动时选择 Attach to Ceru plugin。
+- 如果 VS Code 打开的是父目录或多个仓库，打开生成的 ceru-plugin.code-workspace 才能直接看到该子工程的配置；F5 始终执行“运行和调试”下拉框当前选中的配置。
+- Launch 使用与包管理器无关的 Node 任务；已运行同一个项目时复用现有 Host，并等待 Electron 页面真正可附加后再开始调试。
 - 激活代码已经执行时，点“重新运行”即可再次命中断点。
 - Vue 模板推荐 Vue - Official 扩展；所有模板提供 Prettier 配置。
 - SDK 提供参数、返回值、资源引用、错误码、权限名和图标名提示。
@@ -89,6 +93,7 @@ ceru-plugin list-templates
 ceru-plugin build
 ceru-plugin dev
 ceru-plugin dev --no-open --port 4179
+ceru-plugin preview dist/plugin.js
 ceru-plugin validate dist/plugin.js --json
 ceru-plugin keygen --out .keys/publisher
 ceru-plugin sign dist/plugin.js --key .keys/publisher.private.pem

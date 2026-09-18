@@ -2,12 +2,6 @@ import * as lodash from 'lodash-es'
 import { HOST_ICON_NAMES, HOST_ASSET_NAMES, LODASH_METHODS } from '../../sdk/src/catalog'
 
 let initialized: any
-;(globalThis as any).__ceruSharedModules = Object.create(null)
-;(globalThis as any).__ceruSharedRequire = (name: string) => {
-  const value = (globalThis as any).__ceruSharedModules[name]
-  if (!value) throw new Error('Shared runtime is not declared/available: ' + name)
-  return value
-}
 let entry: any
 let started = false
 let sequence = 0

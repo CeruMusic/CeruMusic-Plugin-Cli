@@ -15,7 +15,7 @@ import { build } from 'esbuild'
 import ts from 'typescript'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { sharedPlugin, vuePlugin, webDistEntry } from './frameworks.js'
+import { stylesheetPlugin, vuePlugin, webDistEntry } from './frameworks.js'
 import {
   encodeArtifact,
   parseJsonStrict,
@@ -32,6 +32,7 @@ export interface BuildConfig {
   resources?: Record<string, { path: string; type: 'json' | 'text' | 'base64'; mime?: string }>
   output?: string
   framework?: 'vanilla' | 'vue' | 'react'
+  /** @deprecated Accepted to migrate 0.1.0 projects; frameworks are now always bundled. */
   sharedLibraries?: Partial<Record<'vue' | 'react' | 'react-dom', string>>
   webDist?: Record<string, string>
 }
@@ -82,7 +83,9 @@ export async function loadProject(project: string): Promise<{ root: string; conf
       ].includes(key)
     )
       throw new Error('Unknown build config key: ' + key)
-  if (raw.sharedLibraries !== undefined) raw.manifest.engines.libraries = raw.sharedLibraries
+  // Older scaffolds declared Host-provided Vue/React. Always migrate their output
+  // to standalone bundles, without requiring authors to rewrite their source.
+  if (raw.manifest?.engines) delete raw.manifest.engines.libraries
   if (raw.framework && !['vanilla', 'vue', 'react'].includes(raw.framework))
     throw new Error('Unsupported framework')
   validateManifest(raw.manifest)
@@ -131,7 +134,7 @@ export async function buildProject(
   const checker = program.getTypeChecker()
   const chunks: string[] = []
   const devModules: Record<string, string> = {}
-  const plugins = [sharedPlugin(config.sharedLibraries), vuePlugin(root, config.framework)]
+  const plugins = [vuePlugin(root, config.framework), stylesheetPlugin()]
   const defines = {
     'process.env.NODE_ENV': '"production"',
     __VUE_OPTIONS_API__: 'true',
@@ -176,7 +179,7 @@ export async function buildProject(
       plugins,
       define: defines,
       loader: {
-        '.svg': 'text',
+        '.svg': 'dataurl',
         '.css': 'text',
         '.png': 'dataurl',
         '.jpg': 'dataurl',
@@ -216,7 +219,7 @@ export async function buildProject(
         define: defines,
         footer: { js: 'globalThis.__ceruStart(__ceru_entry.default);' },
         loader: {
-          '.svg': 'text',
+          '.svg': 'dataurl',
           '.css': 'text',
           '.png': 'dataurl',
           '.jpg': 'dataurl',

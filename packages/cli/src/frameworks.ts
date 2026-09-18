@@ -9,15 +9,6 @@ import vueJsx from '@vue/babel-plugin-jsx'
 import { parse as parseHtml, serialize } from 'parse5'
 import { parse as parseJs } from 'acorn'
 
-export const SHARED_IMPORTS: Record<string, string> = {
-  vue: 'vue',
-  'vue/jsx-runtime': 'vue',
-  react: 'react',
-  'react/jsx-runtime': 'react',
-  'react/jsx-dev-runtime': 'react',
-  'react-dom': 'react-dom',
-  'react-dom/client': 'react-dom',
-}
 const mime: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -68,28 +59,20 @@ async function cssBundle(css: string, directory: string): Promise<string> {
   if (result.outputFiles.length !== 1) throw new Error('CSS emitted an external resource')
   return result.outputFiles[0].text
 }
-export function sharedPlugin(libraries: Record<string, string> = {}): Plugin {
-  if (!!libraries.react !== !!libraries['react-dom'])
-    throw new Error('Share react and react-dom together to avoid duplicate React runtimes')
+/** Side-effect stylesheet imports must survive single-file builds (React/Vue/vanilla). */
+export function stylesheetPlugin(): Plugin {
   return {
-    name: 'ceru-host-libraries',
+    name: 'ceru-inline-stylesheets',
     setup(ctx) {
-      ctx.onResolve({ filter: /^(vue(?:\/.*)?|react(?:\/.*)?|react-dom(?:\/.*)?)$/ }, (args) => {
-        const root = SHARED_IMPORTS[args.path]
-        const family = args.path.startsWith('vue')
-          ? 'vue'
-          : args.path.startsWith('react-dom')
-            ? 'react-dom'
-            : 'react'
-        if (!libraries[family]) return
-        if (!root) return { errors: [{ text: 'Unsupported shared runtime import: ' + args.path }] }
-        return { path: args.path, namespace: 'ceru-host-library' }
+      ctx.onLoad({ filter: /\.css$/ }, async (args) => {
+        const css = await cssBundle(await readFile(args.path, 'utf8'), dirname(args.path))
+        const id = createHash('sha256').update(css).digest('hex').slice(0, 16)
+        return {
+          contents: 'export default ' + JSON.stringify(css) + ';' + styleCode(css, id),
+          loader: 'js',
+          resolveDir: dirname(args.path),
+        }
       })
-      ctx.onLoad({ filter: /.*/, namespace: 'ceru-host-library' }, (args) => ({
-        contents:
-          'module.exports = globalThis.__ceruSharedRequire(' + JSON.stringify(args.path) + ');',
-        loader: 'js',
-      }))
     },
   }
 }

@@ -14,7 +14,7 @@ import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project
 import { runDev } from './dev.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
-const VERSION = '0.1.0'
+const VERSION = '0.1.2'
 const HELP =
   'Ceru Plugin CLI ' +
   VERSION +
@@ -25,6 +25,7 @@ const HELP =
   '  list-templates\n' +
   '  build [--project directory] [--out dist/plugin.js]\n' +
   '  dev [--project directory] [--port 4179] [--debug-port 9223] [--no-open]\n' +
+  '  preview <plugin.js> [--port 4179] [--debug-port 9223] [--no-open]\n' +
   '  validate <plugin.js> [--trusted-key publisher.public.pem] [--json]\n' +
   '  keygen --out .keys/publisher\n' +
   '  sign <plugin.js> --key private.pem [--out signed.js] [--force]\n' +
@@ -53,6 +54,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       port: { type: 'string' },
       'debug-port': { type: 'string' },
       'no-open': { type: 'boolean' },
+      'ensure-running': { type: 'boolean' },
       hidden: { type: 'boolean' },
       electron: { type: 'string' },
       key: { type: 'string' },
@@ -127,13 +129,16 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     console.log('Built ' + output.path + ' (' + output.bytes + ' bytes)')
     return
   }
-  if (command === 'dev') {
+  if (command === 'dev' || command === 'preview') {
+    if (command === 'preview' && !positionals[1]) throw new Error('An artifact file is required')
     await runDev(flags.project ?? '.', {
       port: Number(flags.port ?? 4179),
       debugPort: Number(flags['debug-port'] ?? 9223),
       noOpen: flags['no-open'],
       hidden: flags.hidden,
       electron: flags.electron,
+      artifact: command === 'preview' ? resolve(positionals[1]) : undefined,
+      ensureRunning: flags['ensure-running'],
     })
     return
   }

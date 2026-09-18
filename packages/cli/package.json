@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-cli",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "TypeScript scaffolding, single-file build, watch, validation, signing and issuance for Ceru plugins",
   "type": "module",
   "main": "./dist/index.js",

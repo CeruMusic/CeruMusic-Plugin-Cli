@@ -1,19 +1,37 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { createServer, request as httpRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { resolve, relative } from 'node:path'
+import { resolve, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { satisfies } from 'semver'
 import { readArtifact, parseJsonStrict } from '@shiqianjiang/ceru-plugin-issuer'
 import { buildProject } from './project.js'
 
 const asset = (name: string) => fileURLToPath(new URL('../assets/' + name, import.meta.url))
+async function readDebugTargets(port: number): Promise<any[]> {
+  const response = await fetch('http://127.0.0.1:' + port + '/json/list', {
+    signal: AbortSignal.timeout(750),
+  })
+  if (!response.ok) throw new Error('Debugger is not ready')
+  const value = await response.json()
+  return Array.isArray(value) ? value : []
+}
+async function waitForDebugger(origin: string, port: number, exited: () => boolean): Promise<void> {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline && !exited()) {
+    try {
+      const targets = await readDebugTargets(port)
+      if (targets.some((t) => t.type === 'page' && t.url === origin + '/')) return
+    } catch {}
+    await new Promise((done) => setTimeout(done, 100))
+  }
+  throw new Error('Electron debug target did not become ready at ' + origin)
+}
 const privateAddress = (address: string): boolean => {
   const value = address.toLowerCase()
   if (value.includes(':'))
@@ -157,14 +175,57 @@ export async function runDev(
     debugPort?: number
     hidden?: boolean
     electron?: string
+    artifact?: string
+    ensureRunning?: boolean
   } = {},
 ): Promise<void> {
-  const root = resolve(project)
+  const root = await realpath(resolve(project))
   const port = options.port ?? 4179
   const debugPort = options.debugPort ?? 9223
   if (![port, debugPort].every((n) => Number.isInteger(n) && n >= 0 && n <= 65535))
     throw new Error('Invalid port')
-  let build = await buildProject(root, { development: true })
+  const projectKey = createHash('sha256')
+    .update(process.platform === 'win32' ? root.toLowerCase() : root)
+    .digest('hex')
+  if (options.ensureRunning && port > 0) {
+    let existing: any
+    try {
+      const response = await fetch('http://127.0.0.1:' + port + '/__ceru_dev__/status', {
+        signal: AbortSignal.timeout(750),
+      })
+      if (response.ok) existing = await response.json()
+    } catch {}
+    if (existing) {
+      if (existing.projectKey !== projectKey || existing.debugPort !== debugPort)
+        throw new Error(
+          'This dev port belongs to another project or debug port. Stop it or select Attach to Ceru plugin with the correct ports.',
+        )
+      await waitForDebugger(existing.origin, debugPort, () => false)
+      console.log('Reusing existing Ceru development Host.')
+      console.log('CERU_DEBUG_READY ' + existing.origin + '/')
+      return
+    }
+  }
+  const prepare = async () => {
+    if (!options.artifact) return buildProject(root, { development: true })
+    const path = resolve(options.artifact)
+    const bytes = await readFile(path)
+    const parsed = readArtifact(bytes)
+    if (Object.keys(parsed.header.manifest.engines.libraries ?? {}).length)
+      throw new Error(
+        'This artifact still requires Host frameworks. Rebuild it with CLI 0.1.2 or later.',
+      )
+    // Serve the verified release functions as scripts inside the same isolated
+    // Surface. No project imports, transpiler, or framework is involved here.
+    const devModules = Object.fromEntries(
+      Object.entries(parsed.modules).map(([id, code]) => [
+        id,
+        'globalThis.__ceruStart(' + code + ');\n',
+      ]),
+    )
+    return { path, bytes: bytes.length, devModules }
+  }
+  let build = await prepare()
   let artifact = readArtifact(await readFile(build.path))
   let revision = 1
   let error: string | null = null
@@ -174,20 +235,6 @@ export async function runDev(
   const token = randomBytes(24).toString('hex')
   const nonce = randomBytes(24).toString('base64')
   const catalog = JSON.parse(await readFile(asset('catalog.json'), 'utf8'))
-  const checkLibraries = () => {
-    for (const [name, range] of Object.entries(artifact.header.manifest.engines.libraries ?? {})) {
-      if (!catalog.libraries[name] || !satisfies(catalog.libraries[name], range))
-        throw new Error(
-          'Plugin requires Host ' +
-            name +
-            ' ' +
-            range +
-            '; dev Host provides ' +
-            catalog.libraries[name],
-        )
-    }
-  }
-  checkLibraries()
   let config: Record<string, unknown> = {}
   const grants = new Map<string, { origin: string; methods: string[]; paths: string[] }>()
   const storage = new Map<string, unknown>()
@@ -201,9 +248,8 @@ export async function runDev(
     do {
       dirty = false
       try {
-        build = await buildProject(root, { development: true })
+        build = await prepare()
         artifact = readArtifact(await readFile(build.path))
-        checkLibraries()
         revision++
         error = null
         grants.clear()
@@ -216,9 +262,16 @@ export async function runDev(
     } while (dirty)
     running = false
   }
-  const watcher = watch(root, { recursive: true }, (_event, path) => {
+  const watchRoot = options.artifact ? dirname(resolve(options.artifact)) : root
+  const watcher = watch(watchRoot, { recursive: !options.artifact }, (_event, path) => {
     if (!path) return
     const rel = path.toString().replaceAll('\\', '/')
+    if (options.artifact) {
+      if (resolve(watchRoot, path.toString()) !== resolve(options.artifact)) return
+      clearTimeout(timer)
+      timer = setTimeout(() => void rebuild(), 250)
+      return
+    }
     if (
       /^(node_modules|dist|\.git|\.keys|\.ceru-dev)(\/|$)/.test(rel) ||
       rel === relative(root, build.path).replaceAll('\\', '/') ||
@@ -245,6 +298,16 @@ export async function runDev(
         return
       }
       const url = new URL(request.url ?? '/', origin)
+      if (url.pathname === '/__ceru_dev__/status' && request.method === 'GET') {
+        json(200, {
+          protocol: 1,
+          projectKey,
+          origin,
+          debugPort,
+          mode: options.artifact ? 'preview' : 'dev',
+        })
+        return
+      }
       if (url.pathname.startsWith('/media/') && request.method === 'GET') {
         const lease = leases.get(url.pathname.slice('/media/'.length))
         const grant = lease && grants.get(lease.permissionKey)
@@ -437,16 +500,10 @@ export async function runDev(
       } else if (url.pathname === '/sandbox.html') {
         const moduleId = url.searchParams.get('module') ?? ''
         if (!Object.hasOwn(build.devModules, moduleId)) throw new Error('Unknown module')
-        const libraries = artifact.header.manifest.engines.libraries ?? {}
-        const shared = [libraries.vue ? 'vue' : '', libraries.react ? 'react' : '']
-          .filter(Boolean)
-          .map((name) => '<script nonce="' + nonce + '" src="/shared/' + name + '.js"></script>')
-          .join('')
         contents =
           '<!doctype html><meta charset="utf-8"><div id="plugin-root"></div><script nonce="' +
           nonce +
           '" src="/sandbox.js"></script>' +
-          shared +
           '<script nonce="' +
           nonce +
           '" src="/modules/' +
@@ -470,8 +527,6 @@ export async function runDev(
             '/playground.js': 'playground.js',
             '/style.css': 'style.css',
             '/sandbox.js': 'sandbox.js',
-            '/shared/vue.js': 'shared-vue.js',
-            '/shared/react.js': 'shared-react.js',
           } as Record<string, string>
         )[url.pathname]
         if (!file) {
@@ -546,7 +601,9 @@ export async function runDev(
         console.log('Electron exited: ' + code)
         close()
       })
+      await waitForDebugger(origin, debugPort, () => electron?.exitCode !== null)
       console.log('Electron debugger: 127.0.0.1:' + debugPort + ' (VS Code: Attach to Ceru plugin)')
+      console.log('CERU_DEBUG_READY ' + origin + '/')
     } catch (e) {
       console.error(
         'Electron could not start. Run npm install in the generated project, or use dev --no-open and open the playground URL.',

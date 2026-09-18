@@ -49,6 +49,19 @@ for (const template of TEMPLATES) {
       assert.ok(Object.keys(artifact.modules).length >= 1)
       assert.equal(built.path, join(root, 'dist/plugin.js'))
       assert.ok(!artifact.body.includes('sourceMappingURL'))
+      assert.equal(artifact.header.manifest.engines.libraries, undefined)
+      assert.ok(!artifact.body.includes('__ceruSharedRequire'))
+      const editor = JSON.parse(await readFile(join(root, '.vscode/launch.json'), 'utf8'))
+      for (const entry of editor.configurations) {
+        assert.equal(entry.request, 'attach')
+        assert.equal(entry.address, '127.0.0.1')
+        assert.equal(entry.urlFilter, 'http://127.0.0.1:4179/')
+        assert.equal(entry.targetTypes, undefined)
+      }
+      assert.deepEqual(
+        JSON.parse(await readFile(join(root, 'ceru-plugin.code-workspace'), 'utf8')).folders,
+        [{ path: '.' }],
+      )
       if (template === 'web-dist') {
         const original = await readFile(
           resolve(workspace, 'packages/cli/templates/web-dist', language, 'web-dist/sample.png'),
@@ -64,6 +77,19 @@ test('JavaScript authoring also builds', async () => {
   const root = await fixture('plain-js', 'source', 'js')
   const result = await buildProject(root)
   assert.equal(readArtifact(await readFile(result.path)).header.manifest.id, 'local.plain-js')
+})
+test('legacy Vue sharedLibraries settings produce a self-contained release', async () => {
+  const root = await fixture('legacy-vue', 'vue', 'ts')
+  const file = join(root, 'ceru.plugin.json')
+  const config = JSON.parse(await readFile(file, 'utf8'))
+  config.sharedLibraries = { vue: '^3.5.43' }
+  config.manifest.engines.libraries = { vue: '^3.5.43' }
+  await writeFile(file, JSON.stringify(config))
+  const result = await buildProject(root)
+  const artifact = readArtifact(await readFile(result.path))
+  assert.equal(artifact.header.manifest.engines.libraries, undefined)
+  assert.ok(!artifact.body.includes('__ceruSharedRequire'))
+  assert.ok(artifact.body.includes('function createApp'))
 })
 test('scaffold refuses to replace a populated directory', async () => {
   const root = fixtures.get('source').root
