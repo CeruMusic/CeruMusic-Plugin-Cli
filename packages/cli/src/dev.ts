@@ -11,10 +11,28 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { randomBytes, createHash } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readArtifact, parseJsonStrict } from '@shiqianjiang/ceru-plugin-issuer'
+import {
+  readArtifact,
+  parseJsonStrict,
+  resolveArtifactConfig,
+} from '@shiqianjiang/ceru-plugin-issuer'
 import { buildProject } from './project.js'
 
 const asset = (name: string) => fileURLToPath(new URL('../assets/' + name, import.meta.url))
+function mergeConfig(base: Record<string, any>, override: Record<string, any>) {
+  const result = structuredClone(base)
+  for (const [key, value] of Object.entries(override))
+    result[key] =
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      result[key] &&
+      typeof result[key] === 'object' &&
+      !Array.isArray(result[key])
+        ? mergeConfig(result[key], value)
+        : structuredClone(value)
+  return result
+}
 async function readDebugTargets(port: number): Promise<any[]> {
   const response = await fetch('http://127.0.0.1:' + port + '/json/list', {
     signal: AbortSignal.timeout(750),
@@ -251,14 +269,16 @@ export async function runDev(
   const token = randomBytes(24).toString('hex')
   const nonce = randomBytes(24).toString('base64')
   const catalog = JSON.parse(await readFile(asset('catalog.json'), 'utf8'))
-  let config: Record<string, unknown> = {}
+  let configOverride: Record<string, unknown> = {}
   try {
     const configPath = resolve(root, '.ceru-dev/config.json')
-    config = parseJsonStrict(await readFile(configPath, 'utf8'))
+    configOverride = parseJsonStrict(await readFile(configPath, 'utf8'))
   } catch (error) {
     if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error
   }
   const grants = new Map<string, { name: string }>()
+  const effectiveConfig = () =>
+    mergeConfig(resolveArtifactConfig(artifact.header), configOverride)
   const sockets = new SocketBroker()
   const operations = new Map<string, AbortController>()
   const storage = new Map<string, unknown>()
@@ -368,7 +388,7 @@ export async function runDev(
             migrationWarnings: artifact.migrationWarnings,
             resources: artifact.resources,
             catalog,
-            config,
+            config: effectiveConfig(),
             grants: Object.fromEntries(grants),
           })
           return
@@ -381,7 +401,7 @@ export async function runDev(
         if (url.pathname === '/api/config') {
           if (!input || typeof input !== 'object' || Array.isArray(input))
             throw new Error('Config must be an object')
-          config = input
+          configOverride = input
           json(200, { ok: true })
           return
         }
@@ -451,7 +471,9 @@ export async function runDev(
             )
           }
           if (input.method === 'config.get') {
-            json(200, { value: config })
+            json(200, {
+              value: effectiveConfig(),
+            })
             return
           }
           if (input.method === 'storage.get') {

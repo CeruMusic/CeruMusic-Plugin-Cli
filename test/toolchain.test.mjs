@@ -16,6 +16,7 @@ import {
   parseJsonStrict,
   encodeArtifact,
   DEFAULT_PERSONALIZATION_SCHEMA,
+  resolveArtifactConfig,
 } from '../packages/issuer/dist/index.js'
 import { scaffoldProject, buildProject, TEMPLATES } from '../packages/cli/dist/index.js'
 
@@ -94,6 +95,62 @@ test('JavaScript authoring also builds', async () => {
   const root = await fixture('plain-js', 'source', 'js')
   const result = await buildProject(root)
   assert.equal(readArtifact(await readFile(result.path)).header.manifest.id, 'local.plain-js')
+})
+test('inline and referenced plugin config become one static object', async () => {
+  const root = await fixture('config-reference')
+  await writeFile(
+    join(root, 'src/plugin.config.ts'),
+    [
+      "import { definePluginConfig } from '@shiqianjiang/ceru-plugin-sdk'",
+      "const lossless = ['flac'] as const",
+      "export default definePluginConfig({ kg: { name: '酷狗', qualities: ['320k', ...lossless] } })",
+    ].join('\n'),
+  )
+  const file = join(root, 'ceru.plugin.json')
+  const config = JSON.parse(await readFile(file, 'utf8'))
+  config.config = {
+    apiOrigin: 'https://source.example.com',
+    sources: '@./src/plugin.config.ts',
+    literalAt: '@@customer-name',
+  }
+  await writeFile(file, JSON.stringify(config, null, 2))
+  const built = await buildProject(root)
+  const artifact = readArtifact(await readFile(built.path))
+  assert.deepEqual(JSON.parse(JSON.stringify(artifact.header.config)), {
+    apiOrigin: 'https://source.example.com',
+    sources: { kg: { name: '酷狗', qualities: ['320k', 'flac'] } },
+    literalAt: '@customer-name',
+  })
+  assert.match(artifact.body === '' ? '' : await readFile(built.path, 'utf8'), /exports\.config = \{/)
+  assert.doesNotMatch(await readFile(built.path, 'utf8'), /@\.\/src\/plugin\.config\.ts/)
+})
+test('delivery config recursively overrides build defaults', () => {
+  const header = {
+    formatVersion: 2,
+    syntax: 'js',
+    manifest: fixtures.get('source').artifact.header.manifest,
+    config: {
+      apiOrigin: 'https://default.example.com',
+      sources: { kg: { qualities: ['320k'] }, wy: { qualities: ['flac'] } },
+    },
+    signature: null,
+    delivery: {
+      payload: {
+        personalization: {
+          config: {
+            apiKey: 'delivery-key',
+            sources: { kg: { qualities: ['flac'] } },
+          },
+        },
+      },
+      signature: {},
+    },
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(resolveArtifactConfig(header))), {
+    apiOrigin: 'https://default.example.com',
+    apiKey: 'delivery-key',
+    sources: { kg: { qualities: ['flac'] }, wy: { qualities: ['flac'] } },
+  })
 })
 test('legacy Vue sharedLibraries settings produce a self-contained release', async () => {
   const root = await fixture('legacy-vue', 'vue', 'ts')

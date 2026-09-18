@@ -55,7 +55,25 @@ const schema = {
   title: 'Ceru Plugin Build Configuration',
   type: 'object',
   properties: {
+    $schema: {
+      type: 'string',
+      description: 'Optional editor schema reference; ignored by the build runtime.',
+    },
     manifest,
+    config: {
+      oneOf: [
+        {
+          type: 'object',
+          description: 'JSON-compatible defaults exposed through ctx.config.',
+          additionalProperties: true,
+        },
+        {
+          type: 'string',
+          pattern: '^@.+',
+          description: 'Build-time JSON/JS/TS config reference, for example @./src/plugin.config.ts.',
+        },
+      ],
+    },
     entries: {
       type: 'object',
       description: 'Map stable module IDs to TS/TSX/JS source files',

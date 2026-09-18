@@ -210,7 +210,7 @@ export interface PluginContext extends HostServices {
     url(name: HostAssetName | AssetHandle): Promise<string>
   }
   /** 已验证的配置。凭据字段由 Host 替换为引用，不返回主密钥。 */
-  config: { get<T extends JsonObject = JsonObject>(): Promise<T> }
+  config: { get<T = JsonObject>(): Promise<Readonly<T>> }
   /** Uses the application's own local/cloud playlists after Host permission checks. */
   library: LibraryAPI
   /** Host-provided Socket.IO / WebSocket; no socket library is bundled into the plugin. */
@@ -339,6 +339,9 @@ export function defineGuestAdapter(entry: GuestEntry): GuestEntry {
 }
 export function defineManifest(manifest: PluginManifest): PluginManifest {
   return manifest
+}
+export function definePluginConfig<const T extends JsonObject>(config: T): T {
+  return config
 }
 export function failure(error: MusicFault): ResolveResult {
   return { ok: false, error }

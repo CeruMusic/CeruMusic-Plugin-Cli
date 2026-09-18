@@ -19,6 +19,11 @@ VS Code 按 F5 选择 Launch Ceru plugin；已有调试窗口时选择 Attach to
 激活代码已经执行时，可点击“重新运行”再次命中断点。
 配置文件有 JSON Schema 提示，SDK 提供参数类型、图标名称与 Lodash 方法补全。
 
+`ceru.plugin.json` 的 `config` 可以直接写对象，也可以写成
+`"@./src/plugin.config.ts"`。外部配置使用 `definePluginConfig()` 保留字段类型，
+业务代码通过 `await ctx.config.get<PluginConfig>()` 读取。构建器会递归展开引用，
+最终仍只有一个 `dist/plugin.js`，不会携带配置源文件路径。
+
 ## 宿主资源
 
 - 平台图标：icon: { kind: 'host', name: 'platform.tx' }。

@@ -18,6 +18,7 @@ import { createRequire } from 'node:module'
 import { stylesheetPlugin, vuePlugin, webDistEntry } from './frameworks.js'
 import { hostModulesPlugin, assertBundledDependencies } from './dependencies.js'
 import {
+  canonical,
   encodeArtifact,
   parseJsonStrict,
   readArtifact,
@@ -26,9 +27,11 @@ import {
   type ArtifactHeader,
   type Resource,
 } from '@shiqianjiang/ceru-plugin-issuer'
+import type { JsonObject, JsonValue } from '@shiqianjiang/ceru-plugin-sdk'
 
 export interface BuildConfig {
   manifest: ArtifactHeader['manifest']
+  config?: JsonObject
   entries: Record<string, string>
   resources?: Record<string, { path: string; type: 'json' | 'text' | 'base64'; mime?: string }>
   output?: string
@@ -36,6 +39,109 @@ export interface BuildConfig {
   /** @deprecated Accepted to migrate 0.1.0 projects; frameworks are now always bundled. */
   sharedLibraries?: Partial<Record<'vue' | 'react' | 'react-dom', string>>
   webDist?: Record<string, string>
+}
+
+async function resolveConfigValue(
+  root: string,
+  value: unknown,
+  stack = new Set<string>(),
+  depth = 0,
+): Promise<JsonValue> {
+  if (depth > 32) throw new Error('Plugin config references are too deeply nested')
+  if (typeof value === 'string') {
+    if (value.startsWith('@@')) return value.slice(1)
+    if (!value.startsWith('@')) return value
+    const request = value.slice(1)
+    if (!request) throw new Error('Plugin config reference cannot be empty')
+    const path = await inside(root, request)
+    if (stack.has(path)) throw new Error('Circular plugin config reference: ' + request)
+    stack.add(path)
+    try {
+      const extension = extname(path).toLowerCase()
+      let loaded: unknown
+      if (extension === '.json') {
+        loaded = parseJsonStrict(await readFile(path, 'utf8'))
+      } else if (['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts'].includes(extension)) {
+        const result = await build({
+          absWorkingDir: root,
+          entryPoints: [path],
+          bundle: true,
+          write: false,
+          format: 'esm',
+          platform: 'node',
+          target: 'node22',
+          logLevel: 'silent',
+        })
+        if (result.outputFiles.length !== 1)
+          throw new Error('Config module emitted sidecar files: ' + request)
+        const url =
+          'data:text/javascript;base64,' +
+          Buffer.from(result.outputFiles[0].text).toString('base64') +
+          '#' +
+          randomUUID()
+        const module = await import(url)
+        if (!Object.hasOwn(module, 'default'))
+          throw new Error('Config module must export default: ' + request)
+        loaded = module.default
+      } else {
+        throw new Error('Config reference must be JSON, JS or TS: ' + request)
+      }
+      return resolveConfigValue(root, loaded, stack, depth + 1)
+    } finally {
+      stack.delete(path)
+    }
+  }
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value
+  if (Array.isArray(value))
+    return Promise.all(value.map((item) => resolveConfigValue(root, item, stack, depth + 1)))
+  if (value && typeof value === 'object') {
+    const result: JsonObject = Object.create(null)
+    for (const [key, child] of Object.entries(value)) {
+      if (['__proto__', 'prototype', 'constructor'].includes(key))
+        throw new Error('Unsafe plugin config key: ' + key)
+      result[key] = await resolveConfigValue(root, child, stack, depth + 1)
+    }
+    return result
+  }
+  throw new Error('Plugin config must contain only JSON-compatible values')
+}
+
+async function loadPluginConfig(root: string, value: unknown): Promise<JsonObject | undefined> {
+  if (value === undefined) return undefined
+  const resolved = await resolveConfigValue(root, value)
+  if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved))
+    throw new Error('Plugin config root must resolve to an object')
+  return parseJsonStrict(canonical(resolved)) as JsonObject
+}
+
+function configType(value: JsonValue, depth = 0): string {
+  if (depth > 24) return 'JsonValue'
+  if (value === null) return 'null'
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  if (Array.isArray(value)) {
+    const members = [...new Set(value.map((item) => configType(item, depth + 1)))]
+    return 'readonly (' + (members.join(' | ') || 'JsonValue') + ')[]'
+  }
+  const fields = Object.entries(value).map(
+    ([key, child]) =>
+      'readonly ' + JSON.stringify(key) + ': ' + configType(child, depth + 1) + ';',
+  )
+  return '{ ' + fields.join(' ') + ' }'
+}
+
+async function writeConfigTypes(root: string, config: JsonObject): Promise<string> {
+  const path = resolve(root, '.ceru-dev/types/plugin-config.d.ts')
+  const source =
+    "declare module '@ceru/plugin-config' {\n" +
+    "  type JsonValue = import('@shiqianjiang/ceru-plugin-sdk').JsonValue\n" +
+    '  export type PluginConfig = ' +
+    configType(config) +
+    '\n  const config: PluginConfig\n  export default config\n}\n'
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, source)
+  return path
 }
 
 function entryFunctionName(id: string, suffix: 'Logic' | 'Surface' | 'Module'): string {
@@ -84,7 +190,9 @@ export async function loadProject(project: string): Promise<{ root: string; conf
   for (const key of Object.keys(raw))
     if (
       ![
+        '$schema',
         'manifest',
+        'config',
         'entries',
         'resources',
         'output',
@@ -97,6 +205,7 @@ export async function loadProject(project: string): Promise<{ root: string; conf
   // Older scaffolds declared Host-provided Vue/React. Always migrate their output
   // to standalone bundles, without requiring authors to rewrite their source.
   if (raw.manifest?.engines) delete raw.manifest.engines.libraries
+  raw.config = await loadPluginConfig(root, raw.config)
   if (raw.framework && !['vanilla', 'vue', 'react'].includes(raw.framework))
     throw new Error('Unsupported framework')
   validateManifest(raw.manifest)
@@ -109,12 +218,15 @@ export async function loadProject(project: string): Promise<{ root: string; conf
   }
   return { root, config: raw }
 }
-function checkTypes(root: string): ts.Program {
+function checkTypes(root: string, extraFiles: string[] = []): ts.Program {
   const path = resolve(root, 'tsconfig.json')
   const read = ts.readConfigFile(path, ts.sys.readFile)
   if (read.error) throw new Error(ts.flattenDiagnosticMessageText(read.error.messageText, '\n'))
   const config = ts.parseJsonConfigFileContent(read.config, ts.sys, root)
-  const program = ts.createProgram(config.fileNames, { ...config.options, noEmit: true })
+  const program = ts.createProgram([...new Set([...config.fileNames, ...extraFiles])], {
+    ...config.options,
+    noEmit: true,
+  })
   const diagnostics = [...config.errors, ...ts.getPreEmitDiagnostics(program)]
   if (diagnostics.length) {
     throw new Error(
@@ -141,7 +253,8 @@ export async function buildProject(
     )
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
-  const program = checkTypes(root)
+  const configTypes = await writeConfigTypes(root, config.config ?? {})
+  const program = checkTypes(root, [configTypes])
   const checker = program.getTypeChecker()
   const chunks = new Map<string, string>()
   const devModules: Record<string, string> = {}
@@ -365,6 +478,7 @@ export async function buildProject(
     formatVersion: 2,
     syntax: 'js',
     manifest: config.manifest,
+    ...(config.config ? { config: config.config } : {}),
     signature: null,
   }
   const artifact = encodeArtifact(header, body.join('\n') + '\n')

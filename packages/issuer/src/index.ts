@@ -53,6 +53,7 @@ export interface ArtifactHeader {
   formatVersion: 2
   syntax: 'js'
   manifest: PluginManifest
+  config?: JsonObject
   signature: Proof | null
   template?: TemplateDeclaration
   delivery?: Delivery
@@ -539,11 +540,15 @@ function checkProof(proof: Proof, data: Uint8Array): void {
   )
 }
 export function encodeHeader(header: ArtifactHeader): Buffer {
-  const { manifest, ...metadata } = header
+  const { manifest, config, ...metadata } = header
   const head = Buffer.from(
     'exports.manifest = ' +
       JSON.stringify(manifest, null, 2) +
-      ';\nexports.package = ' +
+      ';\n' +
+      (config === undefined
+        ? ''
+        : 'exports.config = ' + JSON.stringify(config, null, 2) + ';\n') +
+      'exports.package = ' +
       JSON.stringify(metadata, null, 2) +
       ';\n',
   )
@@ -555,6 +560,33 @@ export function encodeArtifact(header: ArtifactHeader, body: string): Buffer {
   ensure(result.length <= LIMITS.file, 'Artifact exceeds size limit')
   return result
 }
+
+function mergeConfig(base: JsonObject, override: JsonObject): JsonObject {
+  const result: JsonObject = JSON.parse(canonical(base))
+  for (const [key, value] of Object.entries(override)) {
+    const current = result[key]
+    result[key] =
+      plain(current) && plain(value)
+        ? mergeConfig(current as JsonObject, value as JsonObject)
+        : (JSON.parse(canonical(value)) as JsonValue)
+  }
+  return result
+}
+
+/** Resolves signed delivery configuration over the defaults embedded at build time. */
+export function resolveArtifactConfig(header: ArtifactHeader): JsonObject {
+  const personalization = header.delivery?.payload.personalization
+  const personalizationObject =
+    personalization && typeof personalization === 'object' && !Array.isArray(personalization)
+      ? (personalization as JsonObject)
+      : undefined
+  const config = personalizationObject?.['config']
+  const override = plain(config)
+    ? (config as JsonObject)
+    : Object.create(null)
+  return mergeConfig(header.config ?? Object.create(null), override)
+}
+
 function checkPolicy(schema: unknown, depth = 0): void {
   ensure(depth <= 12, 'Personalization schema is too deep')
   exactKeys(
@@ -625,6 +657,32 @@ export const DEFAULT_PERSONALIZATION_SCHEMA: JsonObject = {
   },
   additionalProperties: false,
 }
+
+function configValueSchema(value: JsonValue, depth = 0): JsonObject {
+  ensure(depth <= 12, 'Plugin config is too deeply nested for personalization')
+  if (value === null) return { type: 'null' }
+  if (typeof value === 'string') return { type: 'string', maxLength: 8192 }
+  if (typeof value === 'boolean') return { type: 'boolean' }
+  if (typeof value === 'number') return { type: Number.isInteger(value) ? 'integer' : 'number' }
+  if (Array.isArray(value))
+    return {
+      type: 'array',
+      items: configValueSchema(value[0] ?? '', depth + 1),
+      maxItems: 256,
+    }
+  const properties: JsonObject = Object.create(null)
+  for (const [key, child] of Object.entries(value))
+    properties[key] = configValueSchema(child, depth + 1)
+  return { type: 'object', properties, additionalProperties: false }
+}
+
+/** Creates the default delivery policy from a plugin's build-time config shape. */
+export function createPersonalizationSchema(config: JsonObject = {}): JsonObject {
+  const schema = JSON.parse(canonical(DEFAULT_PERSONALIZATION_SCHEMA)) as JsonObject
+  ;(schema.properties as JsonObject).config = configValueSchema(config)
+  return schema
+}
+
 function policyValidator(schema: JsonObject) {
   checkPolicy(schema)
   ensure(schema.type === 'object', 'Personalization root must be an object')
@@ -962,22 +1020,31 @@ export function readArtifact(
     }
     ensure(manifestNode, 'Expected exports.manifest = { ... };')
     const manifest = astJson(manifestNode) as unknown as PluginManifest
+    const configNode = assignment('config')
     const packageNode = assignment('package')
     const metadata = packageNode
       ? astJson(packageNode)
       : { formatVersion: 2, syntax: 'js', signature: null }
     ensure(plain(metadata) && !Object.hasOwn(metadata, 'manifest'), 'Invalid package metadata')
-    header = { ...metadata, manifest } as ArtifactHeader
+    header = {
+      ...metadata,
+      manifest,
+      ...(configNode ? { config: astJson(configNode) as JsonObject } : {}),
+    } as ArtifactHeader
     body = text.slice(offset)
   }
   exactKeys(
     header,
-    ['formatVersion', 'syntax', 'manifest', 'signature', 'template', 'delivery'],
+    ['formatVersion', 'syntax', 'manifest', 'config', 'signature', 'template', 'delivery'],
     'header',
   )
   ensure(header.formatVersion === 2 && header.syntax === 'js', 'Unsupported artifact format/syntax')
   ensure(Object.hasOwn(header, 'signature'), 'Signature field is required')
   validateManifest(header.manifest)
+  if (header.config !== undefined) {
+    ensure(plain(header.config), 'Plugin config must be an object')
+    canonical(header.config)
+  }
   const codeDigest = digest(body)
   let signatureStatus: Artifact['signatureStatus'] = 'unsigned'
   let templateDigest: string | undefined
@@ -1077,7 +1144,8 @@ export function createTemplate(
   const artifact = readArtifact(input)
   ensure(!artifact.header.template, 'Input must be a normal plugin artifact')
   const key = createPrivateKey(options.privateKey)
-  const policy = options.personalizationSchema ?? DEFAULT_PERSONALIZATION_SCHEMA
+  const policy =
+    options.personalizationSchema ?? createPersonalizationSchema(artifact.header.config)
   policyValidator(policy)
   ensure(
     options.issuerPublicKeys.length > 0 && options.issuerPublicKeys.length <= 16,
