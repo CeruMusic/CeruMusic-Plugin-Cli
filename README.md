@@ -4,7 +4,7 @@
 
 这是 v2 协议的开发工具链。调试工作台会实际运行插件；当前音乐软件的 v1 Host 不能直接安装 v2 产物，正式桌面 Host 需要实现对应协议。
 
-当前 npm 首次发布正在等待发布账号完成 2FA 配置。等待期间可克隆本仓库，运行 npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
+v0.1.0 已发布到 npm。也可以从源码运行：npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
 
 ## 快速开始
 
