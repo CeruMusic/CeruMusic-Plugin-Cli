@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync, spawn } from 'node:child_process'
 import { Writable } from 'node:stream'
+import ts from 'typescript'
 import {
   readArtifact,
   signArtifact,
@@ -22,6 +23,12 @@ const workspace = fileURLToPath(new URL('../', import.meta.url))
 const temp = await mkdtemp(join(workspace, '.test-tmp-'))
 const cli = resolve(workspace, 'packages/cli/dist/bin.js')
 const fixtures = new Map()
+function parseEditorConfig(file, text) {
+  // VS Code config files are JSONC; Prettier may preserve trailing commas.
+  const result = ts.parseConfigFileTextToJson(file, text)
+  assert.equal(result.error, undefined)
+  return result.config
+}
 async function fixture(name, template = 'source', language = 'ts') {
   const root = join(temp, name)
   await scaffoldProject(root, { template, language })
@@ -51,7 +58,10 @@ for (const template of TEMPLATES) {
       assert.ok(!artifact.body.includes('sourceMappingURL'))
       assert.equal(artifact.header.manifest.engines.libraries, undefined)
       assert.ok(!artifact.body.includes('__ceruSharedRequire'))
-      const editor = JSON.parse(await readFile(join(root, '.vscode/launch.json'), 'utf8'))
+      const editor = parseEditorConfig(
+        'launch.json',
+        await readFile(join(root, '.vscode/launch.json'), 'utf8'),
+      )
       for (const entry of editor.configurations) {
         assert.equal(entry.request, 'attach')
         assert.equal(entry.address, '127.0.0.1')
@@ -59,7 +69,10 @@ for (const template of TEMPLATES) {
         assert.equal(entry.targetTypes, undefined)
       }
       assert.deepEqual(
-        JSON.parse(await readFile(join(root, 'ceru-plugin.code-workspace'), 'utf8')).folders,
+        parseEditorConfig(
+          'ceru-plugin.code-workspace',
+          await readFile(join(root, 'ceru-plugin.code-workspace'), 'utf8'),
+        ).folders,
         [{ path: '.' }],
       )
       if (template === 'web-dist') {
