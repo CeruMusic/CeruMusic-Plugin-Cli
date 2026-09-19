@@ -9,6 +9,8 @@ export * from './sockets.js'
 import type { SocketAPI } from './sockets.js'
 import type { createHttpClient, HttpClientOptions } from './http.js'
 export * from './music.js'
+export * from './lyrics.js'
+export * from './quality.js'
 export * from './permissions.js'
 export * from './services.js'
 export * from './modules.js'
@@ -84,6 +86,7 @@ export interface SearchRequest {
   kinds: string[]
   filters: JsonObject
   cursor?: string
+  /** Requested size; providers may clamp to their upstream API's supported range. */
   limit: number
 }
 export interface MusicFault {
@@ -134,7 +137,7 @@ export interface PlaylistProvider {
     resource: ResourceRef,
     cursor: string | undefined,
     operation: OperationContext,
-  ): Promise<Page<ContentEntity>>
+  ): Promise<import('./library.js').PlaylistTrackPage>
 }
 export interface ChartProvider {
   list?(operation: OperationContext): Promise<Page<ContentEntity>>
@@ -222,6 +225,9 @@ export interface PluginContext extends HostServices {
   sockets: SocketAPI
   playlistImporters: {
     register(id: string, implementation: PlaylistImporterImplementation): Disposable
+  }
+  lyricConverters: {
+    register(id: string, implementation: import('./lyrics.js').LyricConverter): Disposable
   }
   providers: { register(id: string, implementation: ProviderImplementation): Disposable }
   actions: {

@@ -6,7 +6,7 @@ await mkdir(output, { recursive: true })
 const npmCli = process.env.npm_execpath
 if (!npmCli) throw new Error('Run with npm run pack:all')
 const summaries = []
-for (const name of ['sdk', 'issuer', 'cli', 'create']) {
+for (const name of ['sdk', 'issuer', 'core', 'cli', 'create']) {
   const result = spawnSync(
     process.execPath,
     [npmCli, 'pack', '--json', '--pack-destination', output],

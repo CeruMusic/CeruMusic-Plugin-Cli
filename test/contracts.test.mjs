@@ -11,6 +11,15 @@ import {
   permissionGroup,
 } from '../packages/sdk/dist/index.js'
 import { networkPermissionKey } from '../packages/sdk/dist/http.js'
+import { compareQualities, selectQuality } from '../packages/sdk/dist/quality.js'
+
+test('quality ranking follows provider order even for custom or reordered names', () => {
+  const order = ['master', 'small', 'flac', 'custom-best']
+  assert.equal(compareQualities(order, 'master', 'flac'), -1)
+  assert.equal(compareQualities(order, 'missing', 'flac'), undefined)
+  assert.equal(selectQuality(order), 'custom-best')
+  assert.equal(selectQuality(order, ['master', 'small', 'custom-best'], 'flac'), 'small')
+})
 
 const workspace = fileURLToPath(new URL('../', import.meta.url))
 const sourceConfig = JSON.parse(
@@ -88,6 +97,7 @@ test('standard tracks and millisecond lyric documents pass Core validation', () 
   )
   assert.doesNotThrow(() =>
     assertLyricsDocument({
+      format: 'crlyric',
       version: 1,
       track: ref,
       offsetMs: 0,
@@ -104,6 +114,7 @@ test('standard tracks and millisecond lyric documents pass Core validation', () 
   assert.throws(
     () =>
       assertLyricsDocument({
+        format: 'crlyric',
         version: 1,
         track: ref,
         offsetMs: 0,

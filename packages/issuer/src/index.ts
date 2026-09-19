@@ -219,6 +219,24 @@ export const MANIFEST_SCHEMA = object(
       },
     }),
     contributes: object({
+      lyricConverters: {
+        type: 'array',
+        maxItems: 16,
+        items: object(
+          {
+            id,
+            title: string,
+            formats: {
+              type: 'array',
+              items: {
+                enum: ['auto', 'lrc', 'enhanced-lrc', 'yrc', 'qrc', 'krc', 'ttml', 'plain'],
+              },
+              uniqueItems: true,
+            },
+          },
+          ['id', 'title', 'formats'],
+        ),
+      },
       menus: {
         type: 'array',
         maxItems: 64,
@@ -329,10 +347,22 @@ export const MANIFEST_SCHEMA = object(
       playlistImporters: {
         type: 'array',
         maxItems: 64,
-        items: object({ id, title: string, description: string, placeholder: string }, [
-          'id',
-          'title',
-        ]),
+        items: object(
+          {
+            id,
+            title: string,
+            description: string,
+            placeholder: string,
+            providerId: id,
+            examples: {
+              type: 'array',
+              maxItems: 16,
+              items: object({ label: string, value: string }, ['label', 'value']),
+            },
+            instructions: strings,
+          },
+          ['id', 'title'],
+        ),
       },
       providers: {
         type: 'array',
@@ -544,10 +574,7 @@ function checkProof(proof: Proof, data: Uint8Array): void {
 export function encodeHeader(header: ArtifactHeader): Buffer {
   const { manifest, ...metadata } = header
   const literal = (value: unknown) =>
-    JSON.stringify(value, null, 2).replace(
-      /^(\s*)"([A-Za-z_$][A-Za-z0-9_$]*)":/gm,
-      '$1$2:',
-    )
+    JSON.stringify(value, null, 2).replace(/^(\s*)"([A-Za-z_$][A-Za-z0-9_$]*)":/gm, '$1$2:')
   const head = Buffer.from(
     'exports.manifest = ' +
       literal(manifest) +
@@ -585,9 +612,7 @@ export function resolveArtifactConfig(header: ArtifactHeader): JsonObject {
       ? (personalization as JsonObject)
       : undefined
   const config = personalizationObject?.['config']
-  const override = plain(config)
-    ? (config as JsonObject)
-    : Object.create(null)
+  const override = plain(config) ? (config as JsonObject) : Object.create(null)
   return mergeConfig(header.manifest.config ?? Object.create(null), override)
 }
 
@@ -598,9 +623,10 @@ export function resolveArtifactDisplay(header: ArtifactHeader): {
   author?: string
 } {
   const personalization = header.delivery?.payload.personalization
-  const display = plain(personalization) && plain((personalization as JsonObject).display)
-    ? ((personalization as JsonObject).display as JsonObject)
-    : Object.create(null)
+  const display =
+    plain(personalization) && plain((personalization as JsonObject).display)
+      ? ((personalization as JsonObject).display as JsonObject)
+      : Object.create(null)
   return {
     name: typeof display.name === 'string' ? display.name : header.manifest.name,
     ...(typeof display.description === 'string'
@@ -945,13 +971,14 @@ function inspectBody(
     )
     const generatedEntry =
       exportedNode.type === 'Identifier' && selfContained.has(exportedNode.name)
-    modules[key] = preamble.length && !generatedEntry
-      ? 'async function(ctx) {\n' +
-        preamble.join('\n') +
-        '\nreturn (' +
-        body.slice(exportedNode.start, exportedNode.end) +
-        ')(ctx);\n}'
-      : body.slice(node.start, node.end)
+    modules[key] =
+      preamble.length && !generatedEntry
+        ? 'async function(ctx) {\n' +
+          preamble.join('\n') +
+          '\nreturn (' +
+          body.slice(exportedNode.start, exportedNode.end) +
+          ')(ctx);\n}'
+        : body.slice(node.start, node.end)
   }
   ensure(Object.keys(modules).length <= 128, 'Too many modules')
   const resources = astJson(registry.get('resources')) as Record<string, Resource>

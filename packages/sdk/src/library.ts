@@ -35,7 +35,11 @@ export interface PlaylistImporterImplementation {
   getTracks(
     request: { value: string; cursor?: string; limit: number },
     operation: OperationContext,
-  ): Promise<Page<ContentEntity> & { name?: string }>
+  ): Promise<PlaylistTrackPage>
+}
+export interface PlaylistTrackPage extends Page<ContentEntity> {
+  name?: string
+  playlist?: import('./music.js').PlaylistMetadata
 }
 
 /** Existing application library services. No plugin-owned playlist database. */

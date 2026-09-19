@@ -20,6 +20,10 @@ await build({
   minify: true,
   legalComments: 'inline',
 })
+await mkdir('packages/core/assets', { recursive: true })
+await build({ entryPoints: ['packages/core/runtime/node-globals.ts'], bundle: true, outfile: 'packages/core/assets/node-globals.js', platform: 'browser', format: 'iife', target: 'es2022' })
+await copyFile('packages/cli/assets/sandbox.js', 'packages/core/assets/sandbox.js')
+await copyFile('packages/cli/assets/catalog.json', 'packages/core/assets/catalog.json')
 await build({
   stdin: {
     contents:

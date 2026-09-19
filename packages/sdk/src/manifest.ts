@@ -24,6 +24,7 @@ export interface ProviderDeclaration {
   id: string
   name: string
   protocols: string[]
+  /** Ordered from lowest to highest; names have no intrinsic rank. */
   qualities?: string[]
   icon?: IconRef
   connectionMode?: 'none' | 'single' | 'multiple'
@@ -92,6 +93,11 @@ export interface PluginManifest {
     surfaces?: SurfaceDeclaration[]
   }
   contributes?: {
+    lyricConverters?: {
+      id: string
+      title: string
+      formats: import('./lyrics.js').LyricInputFormat[]
+    }[]
     providers?: ProviderDeclaration[]
     /** Home tabs exist only while at least one enabled plugin contributes them. */
     homeSections?: HomeSectionContribution[]
@@ -104,6 +110,9 @@ export interface PluginManifest {
     playlistImporters?: {
       id: string
       title: string
+      providerId?: string
+      examples?: { label: string; value: string }[]
+      instructions?: string[]
       description?: string
       placeholder?: string
     }[]

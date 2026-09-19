@@ -245,6 +245,9 @@ function openPlaylistImport(importerId, initialValue = '') {
   const title = document.createElement('h3'); title.textContent = meta.title
   const description = document.createElement('p'); description.textContent = meta.description || '粘贴歌单链接或 ID'
   const input = document.createElement('input'); input.placeholder = meta.placeholder || '歌单链接或 ID'; input.value = initialValue
+  const examples = document.createElement('ul')
+  for (const example of meta.examples || []) { const li = document.createElement('li'); li.textContent = example.label + '：' + example.value; examples.append(li) }
+  for (const note of meta.instructions || []) { const li = document.createElement('li'); li.textContent = note; examples.append(li) }
   const load = document.createElement('button'); load.textContent = '读取歌曲'
   const close = document.createElement('button'); close.textContent = '关闭'; close.onclick = () => dialog.close()
   const detail = document.createElement('pre')
@@ -265,7 +268,7 @@ function openPlaylistImport(importerId, initialValue = '') {
     } catch (error) { detail.textContent = error.message }
     finally { load.disabled = false }
   }
-  dialog.append(title, description, input, load, close, hint, detail)
+  dialog.append(title, description, input, examples, load, close, hint, detail)
   document.body.append(dialog); dialog.showModal()
   dialog.addEventListener('close', () => dialog.remove(), { once: true })
 }
@@ -511,6 +514,7 @@ window.addEventListener('message', async (event) => {
         ? state.manifest.contributes?.providers?.some((p) => p.id === data.id)
         : data.kind === 'playlist-importer'
           ? state.manifest.contributes?.playlistImporters?.some((p) => p.id === data.id)
+        : data.kind === 'lyric-converter' ? state.manifest.contributes?.lyricConverters?.some((p) => p.id === data.id)
         : state.manifest.contributes?.commands?.some((p) => p.action === data.id)
     if (valid) {
       registrations.set(data.kind + ':' + data.id, { ...data, frame })

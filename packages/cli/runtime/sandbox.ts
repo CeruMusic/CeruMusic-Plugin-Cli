@@ -17,9 +17,11 @@ const pending = new Map<
 >()
 const providers = new Map<string, any>()
 const playlistImporters = new Map<string, any>()
+const lyricConverters = new Map<string, any>()
 const actions = new Map<string, any>()
 const operations = new Map<string, AbortController>()
 const subscriptions = new Set<(state: any) => void>()
+const hostEvents = new Map<string, Set<(value: any) => void>>()
 const disposers: (() => unknown)[] = []
 const socketHandlers = new Map<string, Map<string, Set<(value: any) => void>>>()
 const providerAliases: Record<string, string> = {
@@ -92,7 +94,7 @@ function rpc(method: string, data: any = {}): Promise<any> {
       timer: setTimeout(() => {
         pending.delete(id)
         reject(new Error('Host RPC timed out: ' + method))
-      }, 20000),
+      }, 120000),
     })
     send('rpc', { id, method, data })
   })
@@ -109,7 +111,7 @@ function shared() {
         assets: '1.0.0',
         ...initialized.catalog.libraries,
       },
-      mode: 'development',
+      mode: initialized.mode ?? 'development',
     }),
     utils: { lodash: Object.freeze(utils) },
     icons: {
@@ -201,8 +203,11 @@ function context() {
       ]),
     ),
     events: {
-      on: () => {
-        throw new Error('Application events require a connected desktop Host')
+      on: (name: string, listener: (value: any) => void) => {
+        if (!['permissions.changed', 'library.changed', 'theme.changed', 'account.changed', 'player.changed'].includes(name)) throw new Error('Event is not connected by this Host')
+        const listeners = hostEvents.get(name) ?? new Set<(value: any) => void>()
+        listeners.add(listener); hostEvents.set(name, listeners)
+        return () => listeners.delete(listener)
       },
     },
     plugin: { id: declared.id, version: declared.version, manifest: declared },
@@ -219,6 +224,12 @@ function context() {
         }
       },
     },
+    lyricConverters: { register: (id: string, implementation: any) => {
+      if (!declared.contributes?.lyricConverters?.some((item: any) => item.id === id)) throw new Error('Undeclared lyric converter')
+      lyricConverters.set(id, implementation)
+      send('register', { kind: 'lyric-converter', id, methods: ['parse', 'export'] })
+      return () => { lyricConverters.delete(id); send('unregister', { kind: 'lyric-converter', id }) }
+    } },
     library: {
       playlists: Object.fromEntries(
         ['list', 'getTracks', 'import'].map((method) => [
@@ -461,6 +472,7 @@ window.addEventListener('message', async (event) => {
     }
   }
   if (message.type === 'state') for (const handler of subscriptions) handler(message.data)
+  if (message.type === 'host-event') for (const handler of hostEvents.get(message.data.event) ?? []) handler(message.data.value)
   if (message.type === 'socket-event') {
     const { id, event, data } = message.data
     for (const handler of socketHandlers.get(id)?.get(event) ?? []) {
@@ -479,10 +491,10 @@ window.addEventListener('message', async (event) => {
     const { id, kind, target, method, args } = message.data
     const abort = new AbortController()
     operations.set(id, abort)
-    const timeout = setTimeout(() => abort.abort(), 15000)
+    const timeout = setTimeout(() => abort.abort(), 120000)
     const operation = {
       id,
-      deadlineAt: Date.now() + 15000,
+      deadlineAt: Date.now() + 120000,
       signal: abort.signal,
       userIntent: { kind: 'user-intent', id },
     }
@@ -492,12 +504,12 @@ window.addEventListener('message', async (event) => {
           ? actions.get(target)
           : kind === 'playlist-importer'
             ? playlistImporters.get(target)?.[method]
-            : providerMethod(providers.get(target), method)
+            : kind === 'lyric-converter' ? lyricConverters.get(target)?.[method] : providerMethod(providers.get(target), method)
       if (typeof fn !== 'function') throw new Error('Method is not registered')
       const value = await fn(...args, operation)
       send('invoke-result', { id, value })
     } catch (error) {
-      send('invoke-result', { id, error: error instanceof Error ? error.message : String(error) })
+      send('invoke-result', { id, error: `[${kind}:${target}${method ? '.' + method : ''}] ` + (error instanceof Error ? error.message : String(error)) })
     } finally {
       clearTimeout(timeout)
       operations.delete(id)

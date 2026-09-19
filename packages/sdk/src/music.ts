@@ -2,11 +2,14 @@ import type { ContentEntity, ResourceRef, ResolveResult } from './index.js'
 
 /** Milliseconds throughout. Platform-specific formats/decryption stay inside the plugin. */
 export interface LyricWord {
+  romanization?: string
   startTimeMs: number
   endTimeMs: number
   text: string
 }
 export interface LyricLine {
+  isBackground?: boolean
+  isDuet?: boolean
   startTimeMs: number
   endTimeMs?: number
   text: string
@@ -14,7 +17,8 @@ export interface LyricLine {
   romanization?: string
   words?: LyricWord[]
 }
-export interface LyricsDocument {
+export interface CrLyric {
+  format: 'crlyric'
   version: 1
   track: ResourceRef
   offsetMs: number
@@ -22,6 +26,8 @@ export interface LyricsDocument {
   /** Untimed lyrics only. Empty lines + no plainText means no available lyrics. */
   plainText?: string
 }
+/** @deprecated Use CrLyric. */
+export type LyricsDocument = CrLyric
 export interface TrackMetadata {
   artists: string[]
   album?: { id?: string; title: string }
@@ -132,6 +138,7 @@ export function assertResolveResult(value: unknown): asserts value is ResolveRes
 export function assertLyricsDocument(value: unknown): asserts value is LyricsDocument {
   if (
     !record(value) ||
+    value.format !== 'crlyric' ||
     value.version !== 1 ||
     !Number.isFinite(value.offsetMs) ||
     !Array.isArray(value.lines) ||
@@ -139,6 +146,7 @@ export function assertLyricsDocument(value: unknown): asserts value is LyricsDoc
   )
     throw new Error('Invalid lyrics document')
   assertResourceRef(value.track)
+  if (value.track.kind !== 'track') throw new Error('Lyrics must reference a track')
   let previous = -1
   for (const line of value.lines) {
     if (
