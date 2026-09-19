@@ -1,0 +1,30 @@
+{
+  "name": "@shiqianjiang/ceru-plugin-core",
+  "version": "0.2.0",
+  "description": "Ceru Music v2 plugin Core runtime and Host adapter boundary",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "license": "MIT",
+  "author": "澜音团队",
+  "engines": { "node": ">=22.12.0" },
+  "dependencies": {
+    "@shiqianjiang/ceru-plugin-issuer": "0.2.3",
+    "@shiqianjiang/ceru-plugin-sdk": "0.2.3"
+  },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CeruMusic/CeruMusic-Plugin-Cli.git",
+    "directory": "packages/core"
+  },
+  "keywords": ["ceru-music", "plugin", "core", "electron"]
+}

@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/sdk packages/issuer packages/cli packages/create && node scripts/build-runtime.mjs",
+    "build": "tsc -b packages/sdk packages/issuer packages/core packages/cli packages/create && node scripts/build-runtime.mjs",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
     "pack:all": "node scripts/pack.mjs"
   },
