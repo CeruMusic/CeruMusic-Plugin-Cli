@@ -24,6 +24,7 @@ export interface ProviderDeclaration {
   id: string
   name: string
   protocols: string[]
+  qualities?: string[]
   icon?: IconRef
   connectionMode?: 'none' | 'single' | 'multiple'
 }
@@ -77,6 +78,7 @@ export interface PluginManifest {
   author?: string
   publisher?: string
   license?: string
+  homepage?: string
   /** Static defaults for ctx.config. Build-time @file sugar is expanded into this object. */
   config?: JsonObject
   engines: {

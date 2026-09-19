@@ -205,7 +205,7 @@ function context() {
         throw new Error('Application events require a connected desktop Host')
       },
     },
-    plugin: { id: declared.id, version: declared.version },
+    plugin: { id: declared.id, version: declared.version, manifest: declared },
     config: { get: () => rpc('config.get') },
     playlistImporters: {
       register: (id: string, implementation: any) => {

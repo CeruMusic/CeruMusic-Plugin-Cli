@@ -149,7 +149,8 @@ function entryFunctionName(id: string, suffix: 'Logic' | 'Surface' | 'Module'): 
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join('')
   const base = name || 'Plugin'
-  return base.startsWith(suffix) || base.endsWith(suffix) ? base : base + suffix
+  const safe = /^[A-Za-z_$]/.test(base) ? base : 'Plugin' + base
+  return safe.startsWith(suffix) || safe.endsWith(suffix) ? safe : safe + suffix
 }
 
 export async function writeAtomic(
@@ -263,6 +264,17 @@ export async function buildProject(
   const program = checkTypes(root, [configTypes])
   const checker = program.getTypeChecker()
   const chunks = new Map<string, string>()
+  const chunkNames = new Map<string, string>()
+  const usedNames = new Set<string>()
+  const uniqueEntryName = (id: string, suffix: 'Logic' | 'Surface' | 'Module') => {
+    const base = entryFunctionName(id, suffix)
+    let name = base
+    let counter = 2
+    while (usedNames.has(name)) name = base + counter++
+    usedNames.add(name)
+    chunkNames.set(id, name)
+    return name
+  }
   const devModules: Record<string, string> = {}
   const surfaceEntries = new Set(
     (config.manifest.modules.surfaces ?? [])
@@ -331,18 +343,17 @@ export async function buildProject(
       '$1const __ceru_entry =',
     )
     assertBundledDependencies(source)
+    const entryName = uniqueEntryName(
+      id,
+      id === config.manifest.modules.logic?.entry
+        ? 'Logic'
+        : surfaceEntries.has(id)
+          ? 'Surface'
+          : 'Module',
+    )
     chunks.set(
       id,
-      'async function ' +
-        entryFunctionName(
-          id,
-          id === config.manifest.modules.logic?.entry
-            ? 'Logic'
-            : surfaceEntries.has(id)
-              ? 'Surface'
-              : 'Module',
-        ) +
-        '(ctx) {\n' +
+      'async function ' + entryName + '(ctx) {\n' +
         source +
         '\nif (typeof __ceru_entry.default !== "function") throw new Error("Entry must default-export a function");\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -405,9 +416,10 @@ export async function buildProject(
       '$1const __ceru_entry =',
     )
     assertBundledDependencies(source)
+    const entryName = uniqueEntryName(id, 'Surface')
     chunks.set(
       id,
-      'async function ' + entryFunctionName(id, 'Surface') + '(ctx) {\n' +
+      'async function ' + entryName + '(ctx) {\n' +
         source +
         '\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -452,12 +464,22 @@ export async function buildProject(
       }
   }
   const emitted = new Set<string>()
-  const body: string[] = []
+  const definitions: string[] = []
+  const exports: string[] = []
   const logicEntry = config.manifest.modules.logic?.entry
   if (logicEntry) {
     const logic = chunks.get(logicEntry)
+    const name = chunkNames.get(logicEntry)
     if (!logic) throw new Error('Missing compiled logic entry: ' + logicEntry)
-    body.push('// Invisible plugin logic\nexports.activate = ' + logic + ';')
+    if (!name) throw new Error('Missing compiled logic name: ' + logicEntry)
+    definitions.push(
+      '// Invisible plugin logic\nconst ' +
+        name +
+        ' = /* @ceru-self-contained */ ' +
+        logic +
+        ';',
+    )
+    exports.push('exports.activate = ' + name + ';')
     emitted.add(logicEntry)
   }
   const visibleSurfaces = (config.manifest.modules.surfaces ?? []).filter(
@@ -466,27 +488,55 @@ export async function buildProject(
   if (visibleSurfaces.length) {
     const entries = visibleSurfaces.map((surface) => {
       const entry = chunks.get(surface.entry)
+      const name = chunkNames.get(surface.entry)
       if (!entry) throw new Error('Missing compiled Surface entry: ' + surface.entry)
+      if (!name) throw new Error('Missing compiled Surface name: ' + surface.entry)
       emitted.add(surface.entry)
-      return JSON.stringify(surface.id) + ': ' + entry
+      definitions.push(
+        '// Visible plugin surface: ' +
+          surface.id +
+          '\nconst ' +
+          name +
+          ' = /* @ceru-self-contained */ ' +
+          entry +
+          ';',
+      )
+      return JSON.stringify(surface.id) + ': ' + name
     })
-    body.push('// Visible plugin surfaces\nexports.surfaces = {\n' + entries.join(',\n') + '\n};')
+    definitions.push('const surfaces = {\n' + entries.join(',\n') + '\n};')
+    exports.push('exports.surfaces = surfaces;')
   }
   const modules = [...chunks].filter(([id]) => !emitted.has(id))
-  if (modules.length)
-    body.push(
-      '// Additional plugin modules\nexports.modules = {\n' +
-        modules.map(([id, entry]) => JSON.stringify(id) + ': ' + entry).join(',\n') +
-        '\n};',
-    )
-  body.push('// Embedded static resources\nexports.resources = ' + JSON.stringify(resources) + ';')
+  if (modules.length) {
+    const entries = modules.map(([id, entry]) => {
+      const name = chunkNames.get(id)
+      if (!name) throw new Error('Missing compiled module name: ' + id)
+      definitions.push(
+        '// Additional plugin module: ' +
+          id +
+          '\nconst ' +
+          name +
+          ' = /* @ceru-self-contained */ ' +
+          entry +
+          ';',
+      )
+      return JSON.stringify(id) + ': ' + name
+    })
+    definitions.push('const modules = {\n' + entries.join(',\n') + '\n};')
+    exports.push('exports.modules = modules;')
+  }
+  definitions.push(
+    '// Embedded static resources\nconst resources = ' + JSON.stringify(resources) + ';',
+  )
+  exports.push('exports.resources = resources;')
+  const body = [...definitions, '// Public plugin exports', ...exports].join('\n\n') + '\n'
   const header: ArtifactHeader = {
     formatVersion: 2,
     syntax: 'js',
     manifest: config.manifest,
     signature: null,
   }
-  const artifact = encodeArtifact(header, body.join('\n') + '\n')
+  const artifact = encodeArtifact(header, body)
   readArtifact(artifact)
   const output = resolve(root, options.out ?? config.output ?? 'dist/plugin.js')
   if (extname(output) !== '.js')

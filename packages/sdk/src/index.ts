@@ -183,7 +183,12 @@ export interface ProviderImplementation {
 }
 export interface PluginContext extends HostServices {
   modules: PluginModules
-  readonly plugin: { id: string; version: string }
+  readonly plugin: {
+    id: string
+    version: string
+    /** The validated installed manifest. Runtime configuration is manifest.config. */
+    manifest: Readonly<PluginManifest>
+  }
   /** 当前 Host 的协议版本与共享资源版本。 */
   readonly host: {
     apiVersion: string

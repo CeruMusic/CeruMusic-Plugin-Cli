@@ -32,6 +32,19 @@ test('home sections are contribution-driven and reference declared providers', (
   assert.throws(() => validateManifest(manifest), /Unknown home section provider/)
 })
 
+test('manifest keeps standard provider metadata separate from custom config', () => {
+  const manifest = structuredClone(sourceConfig.manifest)
+  manifest.homepage = 'https://source.example.com'
+  manifest.config = {
+    apiKey: 'customer-key',
+    customBusinessField: { enabled: true },
+  }
+  manifest.contributes.providers[0].qualities = ['128k', '320k', 'flac']
+  assert.doesNotThrow(() => validateManifest(manifest))
+  manifest.config = 'not-an-object'
+  assert.throws(() => validateManifest(manifest), /Invalid manifest/)
+})
+
 test('application CSS requires its grouped high-impact permission', () => {
   const manifest = structuredClone(sourceConfig.manifest)
   manifest.contributes.styles = [{ id: 'theme', resource: 'theme.css', scope: 'application' }]

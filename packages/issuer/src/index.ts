@@ -195,6 +195,7 @@ export const MANIFEST_SCHEMA = object(
     author: string,
     publisher: string,
     license: string,
+    homepage: string,
     config: { type: 'object', additionalProperties: true },
     engines: object(
       {
@@ -341,6 +342,7 @@ export const MANIFEST_SCHEMA = object(
             id,
             name: string,
             protocols: strings,
+            qualities: strings,
             connectionMode: { enum: ['none', 'single', 'multiple'] },
             icon: {
               oneOf: [
@@ -784,6 +786,35 @@ function inspectBody(
   let registry: Map<string, Ast>
   const preamble: string[] = []
   const functions = new Map<string, Ast>()
+  const bindings = new Map<string, Ast>()
+  const selfContained = new Set<string>()
+  const staticOrReference = (node: Ast, depth = 0): void => {
+    ensure(depth <= 64, 'Static export nesting exceeds 64')
+    if (node.type === 'Identifier' || node.type === 'Literal') return
+    if (
+      node.type === 'UnaryExpression' &&
+      node.operator === '-' &&
+      node.argument.type === 'Literal'
+    )
+      return
+    if (node.type === 'ArrayExpression') {
+      for (const item of node.elements) {
+        ensure(item, 'Array holes are forbidden')
+        staticOrReference(item, depth + 1)
+      }
+      return
+    }
+    for (const [, child] of astObject(node)) staticOrReference(child, depth + 1)
+  }
+  const resolveBinding = (node: Ast): Ast => {
+    const seen = new Set<string>()
+    while (node?.type === 'Identifier' && bindings.has(node.name)) {
+      ensure(!seen.has(node.name), 'Circular top-level binding: ' + node.name)
+      seen.add(node.name)
+      node = bindings.get(node.name)
+    }
+    return node
+  }
   let sourceFormat: Artifact['sourceFormat'] = 'exports-v2'
   if (
     tree.body.length === 1 &&
@@ -832,9 +863,15 @@ function inspectBody(
             isFunction || isRequire || isStatic,
             'Top-level variables must be static data, functions, or require() imports',
           )
-          if (isStatic) astJson(init)
-          if (declaration.id.type === 'Identifier' && isFunction)
-            functions.set(declaration.id.name, init)
+          if (isStatic) staticOrReference(init)
+          if (declaration.id.type === 'Identifier') {
+            bindings.set(declaration.id.name, init)
+            if (isFunction) {
+              functions.set(declaration.id.name, init)
+              if (body.slice(declaration.id.end, init.start).includes('@ceru-self-contained'))
+                selfContained.add(declaration.id.name)
+            }
+          }
         }
         preamble.push(body.slice(statement.start, statement.end))
         continue
@@ -869,13 +906,14 @@ function inspectBody(
         value: node,
       })
     if (exported.has('modules'))
-      for (const [key, node] of astObject(exported.get('modules'))) addModule(key, node)
+      for (const [key, node] of astObject(resolveBinding(exported.get('modules'))))
+        addModule(key, node)
     if (exported.has('activate')) {
       ensure(manifest.modules.logic, 'activate requires modules.logic')
       addModule(manifest.modules.logic.entry, exported.get('activate'))
     }
     if (exported.has('surfaces'))
-      for (const [id, node] of astObject(exported.get('surfaces'))) {
+      for (const [id, node] of astObject(resolveBinding(exported.get('surfaces')))) {
         const surface = manifest.modules.surfaces?.find(
           (item) => item.id === id && item.kind === 'web',
         )
@@ -884,7 +922,10 @@ function inspectBody(
       }
     registry = new Map([
       ['modules', { type: 'ObjectExpression', properties }],
-      ['resources', exported.get('resources') ?? { type: 'ObjectExpression', properties: [] }],
+      [
+        'resources',
+        resolveBinding(exported.get('resources')) ?? { type: 'ObjectExpression', properties: [] },
+      ],
     ])
   }
   const modules: Record<string, string> = Object.create(null)
@@ -902,7 +943,9 @@ function inspectBody(
         (!node.params.length || node.params[0].type === 'Identifier'),
       'Module must be a function with one context parameter',
     )
-    modules[key] = preamble.length
+    const generatedEntry =
+      exportedNode.type === 'Identifier' && selfContained.has(exportedNode.name)
+    modules[key] = preamble.length && !generatedEntry
       ? 'async function(ctx) {\n' +
         preamble.join('\n') +
         '\nreturn (' +

@@ -61,6 +61,14 @@ for (const template of TEMPLATES) {
       assert.equal(artifact.sourceFormat, 'exports-v2')
       assert.match(artifact.body, /exports\.(activate|surfaces|modules)/)
       assert.match(artifact.body, /async function [A-Za-z][A-Za-z0-9]*\(ctx\)/)
+      assert.match(
+        artifact.body,
+        /const [A-Za-z][A-Za-z0-9]* = \/\* @ceru-self-contained \*\/ async function/,
+      )
+      assert.doesNotMatch(artifact.body, /exports\.activate = async function/)
+      const publicExports = artifact.body.indexOf('// Public plugin exports')
+      assert.ok(publicExports > 0)
+      assert.ok(artifact.body.indexOf('exports.resources = resources') > publicExports)
       assert.doesNotMatch(artifact.body, /\nvar __ceru_entry =/)
       assert.ok(!artifact.body.includes('__ceruSharedRequire'))
       const editor = parseEditorConfig(

@@ -46,6 +46,11 @@
           "minLength": 1,
           "maxLength": 4096
         },
+        "homepage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
         "config": {
           "type": "object",
           "additionalProperties": true
@@ -506,6 +511,16 @@
                     "maxLength": 4096
                   },
                   "protocols": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "qualities": {
                     "type": "array",
                     "items": {
                       "type": "string",
