@@ -1,12 +1,26 @@
 # Ceru Music 插件系统 v2 设计方案
 
-> 状态：架构设计提案。工具链实现与实际包名以本仓库 README 为准；本稿不表示完整生产 Host 已实现。
+> 状态：v2 Core/SDK/CLI 已实现；CeruMusic Electron Host 正在接入。本文中尚未接入生产 Host 的账号、歌单持久化和 UI slot 仍标记为适配项。
 > 当前工具链支持编译后单 JS，也可选用 .jsx 文件名；Vue/React 生产运行代码编入插件，宿主不提供框架。<br>
-> 日期：2026-09-18。<br>
+> 日期：2026-09-19。<br>
 > 范围：面向当前 Electron 桌面软件，独立于仓库实际代码，只描述目标架构与协议；未来其他客户端仅预留适配边界，不纳入本次实现要求。本文中的单文件格式、API、CLI、权限名均为拟议设计，不代表已经实现。<br>
 > 核心方向：**Electron Host + 可见/不可见模块 + 寄生插件关系 + 单 JS 发行与动态发放 + 可撤销授权 + 无需上传插件的歌曲分享。**
 
 阅读路线：总体设计见第 1–5 节；单文件格式见第 6 节；协议、界面与权限见第 7–12 节；**寄生插件见第 13 节、动态生成见第 16 节、歌曲分享见第 17 节**；Electron 范围见第 18 节；开发分期和验收见第 21–23 节。
+
+实现状态：`@shiqianjiang/ceru-plugin-core@0.2.0` 已发布。Core 负责读取 artifact、校验 manifest、接收 Provider/Action/Importer 注册并校验标准结果；Electron Host 负责 sandbox、网络、权限、播放器和歌单服务。插件代码不会在 Electron 主线程执行。
+
+```ts
+const core = await PluginCore.load(pluginJs, {
+  host: {
+    activate: (artifact, context) => sandbox.run(artifact, context),
+    request: requestThroughElectronHost,
+  },
+})
+
+await core.invokeProvider('tx', 'tracks.search', [request], operation)
+await core.importPlaylist('import.tx', pastedLink, undefined, 100, operation)
+```
 
 ## 1. 建议先确定的架构结论
 
