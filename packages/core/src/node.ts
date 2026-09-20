@@ -2,10 +2,17 @@ import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
 import type { Artifact } from '@shiqianjiang/ceru-plugin-issuer'
 
+export interface GuestBoot {
+  id: string
+  script: string
+  info: { name: string; version: string; author?: string; description?: string; homepage?: string }
+}
+
 /** Node worker + realm-local SDK. No Node modules or host objects enter plugin globals. */
 export class NodePluginSandbox {
   private worker?: Worker
   private generation = randomUUID()
+  private failure?: string
   private pending = new Map<
     string,
     {
@@ -18,7 +25,7 @@ export class NodePluginSandbox {
     private readonly rpc: (method: string, data: any) => Promise<any>,
     private readonly event: (type: string, data: any) => void,
   ) {}
-  async start(artifact: Artifact): Promise<void> {
+  async start(artifact: Artifact, guest?: GuestBoot): Promise<void> {
     const entry = artifact.header.manifest.modules.logic?.entry
     if (!entry) return
     const worker = new Worker(new URL('./node-worker.js', import.meta.url), {
@@ -27,11 +34,15 @@ export class NodePluginSandbox {
     })
     this.worker = worker
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error('Plugin activation timed out'))
-        this.dispose()
-      }, 30000)
+      const timer = setTimeout(
+        () => {
+          reject(new Error('Plugin activation timed out'))
+          this.dispose()
+        },
+        guest ? 120000 : 30000,
+      )
       worker.on('error', (error) => {
+        this.failure = error.message
         clearTimeout(timer)
         reject(error)
         this.dispose()
@@ -40,7 +51,7 @@ export class NodePluginSandbox {
         clearTimeout(timer)
         reject(new Error('Plugin runtime stopped'))
         this.dispose()
-        this.event('closed', {})
+        this.event('closed', { reason: this.failure })
       })
       worker.on('message', (message) => {
         if (message?.generation !== this.generation) return
@@ -52,6 +63,7 @@ export class NodePluginSandbox {
             return
           }
           if (type === 'failed') {
+            this.failure = String(data.message)
             clearTimeout(timer)
             reject(new Error(String(data.message)))
             this.dispose()
@@ -91,6 +103,7 @@ export class NodePluginSandbox {
         manifest: artifact.header.manifest,
         resources: artifact.resources,
         entry: artifact.modules[entry],
+        guest,
       })
     })
   }

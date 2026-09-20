@@ -7,11 +7,41 @@ import { validateManifest } from '../packages/issuer/dist/index.js'
 import {
   assertContentPage,
   assertLyricsDocument,
+  assertNativeView,
   assertResolveResult,
+  assertResourceRef,
+  retargetTrackRef,
   permissionGroup,
 } from '../packages/sdk/dist/index.js'
 import { networkPermissionKey } from '../packages/sdk/dist/http.js'
 import { compareQualities, selectQuality } from '../packages/sdk/dist/quality.js'
+
+test('public track routing transfers canonical identity only; private connections retain their owner', () => {
+  const ref = { pluginId: 'origin', providerId: 'wy', kind: 'track', id: '42',
+    scope: 'provider', data: { privateToken: 'not-for-another-plugin' } }
+  assert.equal(retargetTrackRef(ref, 'origin'), ref)
+  assert.deepEqual(retargetTrackRef(ref, 'preferred'), {
+    pluginId: 'preferred', providerId: 'wy', kind: 'track', id: '42', scope: 'provider',
+  })
+  assert.throws(() => retargetTrackRef({ ...ref, scope: undefined }, 'preferred'), /Private/)
+  assert.throws(() => assertResourceRef({ ...ref, connectionId: 'account' }), /connection/)
+  assert.throws(() => assertResourceRef({ ...ref, kind: 'playlist' }), /public track/)
+})
+
+test('quality sizes are actual positive byte counts keyed by advertised quality IDs', () => {
+  const item = { ref: { pluginId: 'origin', providerId: 'wy', kind: 'track', id: '42' },
+    title: 'Track', capabilities: [], metadata: { artists: [], qualities: ['128k', 'flac'],
+      qualitySizes: { '128k': 1234567, flac: 22000123 } } }
+  assert.doesNotThrow(() => assertContentPage({ items: [item] }))
+  for (const invalid of [-1, 0, 1.5, Infinity, '12 MB', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => assertContentPage({ items: [{ ...item, metadata: {
+      ...item.metadata, qualitySizes: { flac: invalid },
+    } }] }), /quality sizes/)
+  }
+  assert.throws(() => assertContentPage({ items: [{ ...item, metadata: {
+    ...item.metadata, qualitySizes: { unknown: 42 },
+  } }] }), /quality sizes/)
+})
 
 test('quality ranking follows provider order even for custom or reordered names', () => {
   const order = ['master', 'small', 'flac', 'custom-best']
@@ -19,6 +49,36 @@ test('quality ranking follows provider order even for custom or reordered names'
   assert.equal(compareQualities(order, 'missing', 'flac'), undefined)
   assert.equal(selectQuality(order), 'custom-best')
   assert.equal(selectQuality(order, ['master', 'small', 'custom-best'], 'flac'), 'small')
+})
+
+test('native views are data-only and may reference only declared actions', () => {
+  const actions = new Set(['page.open', 'track.play'])
+  assert.doesNotThrow(() =>
+    assertNativeView(
+      {
+        type: 'page',
+        title: 'Library',
+        actions: [{ label: 'Refresh', action: 'page.open', primary: true }],
+        sections: [
+          {
+            id: 'recent',
+            layout: 'list',
+            onPlay: 'track.play',
+            items: [],
+          },
+        ],
+      },
+      actions,
+    ),
+  )
+  assert.throws(
+    () =>
+      assertNativeView(
+        { type: 'page', sections: [{ id: 'recent', layout: 'list', onPlay: 'missing', items: [] }] },
+        actions,
+      ),
+    /Invalid native section/,
+  )
 })
 
 const workspace = fileURLToPath(new URL('../', import.meta.url))
@@ -127,6 +187,31 @@ test('standard tracks and millisecond lyric documents pass Core validation', () 
   )
   assert.doesNotThrow(() =>
     assertResolveResult({ ok: true, url: 'https://media.example/song.mp3' }),
+  )
+  assert.doesNotThrow(() =>
+    assertResolveResult({
+      ok: true,
+      url: 'https://media.example/song.mp3',
+      requestHeaders: { Referer: 'https://player.example/', 'User-Agent': 'Ceru fixture' },
+    }),
+  )
+  assert.throws(
+    () =>
+      assertResolveResult({
+        ok: true,
+        url: 'https://media.example/song.mp3',
+        requestHeaders: { Host: 'attacker.example' },
+      }),
+    /Invalid playback request header/,
+  )
+  assert.throws(
+    () =>
+      assertResolveResult({
+        ok: true,
+        url: 'https://media.example/song.mp3',
+        requestHeaders: { Referer: 'https://player.example/\r\nX-Leak: yes' },
+      }),
+    /Invalid playback request header/,
   )
   assert.doesNotThrow(() =>
     assertResolveResult({ ok: false, error: { code: 'RATE_LIMITED', message: 'Later' } }),

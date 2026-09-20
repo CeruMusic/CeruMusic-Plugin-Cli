@@ -126,6 +126,43 @@
               ],
               "additionalProperties": false
             },
+            "share": {
+              "type": "object",
+              "properties": {
+                "entry": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                },
+                "configKeys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "maxItems": 128,
+                  "uniqueItems": true
+                },
+                "guestAdapterId": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                },
+                "guestGlobals": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "maxItems": 128,
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "entry"
+              ],
+              "additionalProperties": false
+            },
             "surfaces": {
               "type": "array",
               "maxItems": 64,
@@ -139,12 +176,61 @@
                   "kind": {
                     "enum": [
                       "schema",
-                      "web"
+                      "web",
+                      "native"
                     ]
                   },
                   "entry": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "presentation": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "drawer",
+                          "modal"
+                        ]
+                      },
+                      "placement": {
+                        "enum": [
+                          "left",
+                          "right",
+                          "top",
+                          "bottom"
+                        ]
+                      },
+                      "size": {
+                        "type": "integer",
+                        "minimum": 280,
+                        "maximum": 1200
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "lifecycle": {
+                    "type": "object",
+                    "properties": {
+                      "openAction": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      },
+                      "closeAction": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -221,6 +307,11 @@
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
                   },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
                   "slot": {
                     "enum": [
                       "playlist.import",
@@ -294,6 +385,76 @@
                   "slot",
                   "title",
                   "commandId"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "accountItems": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "action": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "logoutAction": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "view",
+                  "action"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "playlistSections": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": -1000,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "view"
                 ],
                 "additionalProperties": false
               }
@@ -704,6 +865,11 @@
                     "minLength": 1,
                     "maxLength": 4096
                   },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
                   "action": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
@@ -801,6 +967,45 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 4096
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "extensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "badge": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 24
+                      },
+                      "backgroundColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+                      },
+                      "textColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "backgroundColor",
+                      "textColor"
+                    ],
+                    "additionalProperties": false
                   },
                   "bootstrap": {
                     "type": "string",

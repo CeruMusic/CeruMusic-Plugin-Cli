@@ -2,6 +2,7 @@ import CryptoJS from 'crypto-js'
 import { Buffer } from 'buffer'
 
 const words = (value) => CryptoJS.enc.Hex.parse(Buffer.from(value).toString('hex'))
+/** @returns {Buffer} */
 const bytes = (value) => Buffer.from(value.toString(CryptoJS.enc.Hex), 'hex')
 
 export function createHash(name) {
@@ -17,6 +18,7 @@ export function createHash(name) {
       hash.update(words(value))
       return this
     },
+    /** @returns {string | Buffer} */
     digest(encoding) {
       const result = bytes(hash.finalize())
       return encoding ? result.toString(encoding) : result
@@ -28,10 +30,12 @@ function cipher(mode, key, iv, decrypt) {
   if (!/^aes-(128|192|256)-(cbc|ecb)$/i.test(mode)) throw new Error('Unsupported cipher: ' + mode)
   const chunks = []
   return {
+    /** @returns {Buffer} */
     update(value) {
       chunks.push(Buffer.from(value))
       return Buffer.alloc(0)
     },
+    /** @returns {Buffer} */
     final() {
       const data = words(Buffer.concat(chunks))
       const options = {
@@ -49,12 +53,14 @@ function cipher(mode, key, iv, decrypt) {
 }
 export const createCipheriv = (mode, key, iv) => cipher(mode, key, iv, false)
 export const createDecipheriv = (mode, key, iv) => cipher(mode, key, iv, true)
+/** @returns {Buffer} */
 export const randomBytes = (size) =>
   Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(size)))
 export const randomUUID = () => globalThis.crypto.randomUUID()
 export const constants = { RSA_NO_PADDING: 3 }
 
 // SPKI public-key parsing for the existing NetEase no-padding RSA request format.
+/** @returns {Buffer} */
 export function publicEncrypt(options, value) {
   if (options.padding !== constants.RSA_NO_PADDING) throw new Error('Unsupported RSA padding')
   const der = Buffer.from(options.key.replace(/-----[^-]+-----|\s/g, ''), 'base64')

@@ -32,6 +32,12 @@ if (template === 'source') {
   manifest.manifest.modules.surfaces = [{ id: 'page', kind: 'web', entry: 'view.main' }]
   manifest.entries['view.main'] = 'src/view.ts'
 }
+manifest.manifest.modules.surfaces[0].lifecycle = {
+  openAction: 'surface.open',
+  closeAction: 'surface.close',
+}
+for (const action of ['surface.open', 'surface.close', 'surface.inspect'])
+  manifest.manifest.contributes.commands.push({ id: action, title: action, action })
 manifest.manifest.contributes.providers ||= [
   {
     id: 'catalog',
@@ -52,6 +58,10 @@ await writeFile(
   [
     "import { definePlugin } from '@shiqianjiang/ceru-plugin-sdk'",
     'export default definePlugin(async (ctx) => {',
+    'let opened=0, closed=0;',
+    "ctx.actions.register('surface.open', async()=>{opened++; await ctx.ui.setState('page',{status:'mounted'});});",
+    "ctx.actions.register('surface.close', ()=>{closed++;});",
+    "ctx.actions.register('surface.inspect', ()=>({opened,closed}));",
     "  ctx.actions.register('hello', async () => { await ctx.ui.notify({key:'hello',level:'info',message:'Hello from real execution'}); return { asset: (await ctx.assets.url('placeholder.cover')).startsWith('data:image/'), icon: (await ctx.icons.url('platform.tx')).startsWith('data:image/svg+xml') } })",
     "  ctx.actions.register('environment', () => { let parentAccess = false; try { parentAccess = !!parent.document.body } catch {} return { node: typeof (globalThis as any).process, parentAccess } })",
     "  ctx.providers.register('catalog', { tracks: {",
@@ -317,6 +327,21 @@ try {
     await buttonText(true)
     await waitFor(async () => (await buttonText()).includes('1'))
   }
+  await waitFor(
+    async () =>
+      (await evaluate("window.__ceruDev.runAction('surface.inspect')", true)).opened === 1,
+  )
+  await evaluate("document.getElementById('close-view').click()")
+  await waitFor(
+    async () =>
+      (await evaluate("window.__ceruDev.runAction('surface.inspect')", true)).closed === 1,
+  )
+  assert.equal(await evaluate("document.querySelectorAll('#preview iframe').length"), 0)
+  await evaluate("document.querySelector('#views button').click()")
+  await waitFor(
+    async () =>
+      (await evaluate("window.__ceruDev.runAction('surface.inspect')", true)).opened === 2,
+  )
   const screenshot = await send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: false,

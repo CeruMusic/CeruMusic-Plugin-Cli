@@ -8,6 +8,7 @@ coverage/
 .test-tmp-*
 .electron-smoke-*/
 .electron-probe/
+.release-audit/
 .npmrc
 .env
 .env.*

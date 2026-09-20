@@ -1,5 +1,42 @@
 # Ceru Plugin SDK
 
+0.3.5 新增 `contributes.playlistSections`、`HostNavigationRequest` 和 `assertNavigationRequest`。插件通过 `ui.navigation.open({ page: 'playlist', sectionId })` 前往 Host 现有歌单页的原生区块，校验以调用插件的 manifest 为准。
+
+## 原生 UI 与账号菜单
+
+本节接口由 0.3.3 完整提供。
+
+从根入口导入 `defineNativeView`、`NativeView`、`assertNativeView` 和 `AccountSummary`。`kind: 'native'` 的 Surface 以声明的 action 为 render 入口，返回网格／列表与标准内容数据，由 Host 的原生组件渲染。`contributes.accountItems` 以公开摘要动作和账号 Surface 接入 Host 账号菜单；账号业务、凭据和 Vue 登录页面保留在插件内。
+
+[原生 Surface、导航、播放与账号贡献教程](https://github.com/CeruMusic/CeruMusic-Plugin-Cli/blob/main/docs/NATIVE-SURFACES.md)。脚手架 `connected-library` 的 JS/TS 示例可直接构建和预览。
+
+## 0.2.5 类型同步
+
+0.2.5 补齐桌面 v2 已使用的 Guest、分享解析、Storage、插件更新和导入界面契约。
+Guest / 分享 / 存储类型可从包根入口导入，也可分别从 `/guests`、`/share`、`/storage` 导入：
+
+```ts
+import type {
+  GuestInfo,
+  GuestBootstrapAPI,
+  ShareResolverEntry,
+  PluginStorageAPI,
+} from '@shiqianjiang/ceru-plugin-sdk'
+import type { GuestInfo as Guest } from '@shiqianjiang/ceru-plugin-sdk/guests'
+import type { ShareResolverEntry as Resolver } from '@shiqianjiang/ceru-plugin-sdk/share'
+```
+
+`PluginContext.storage` 支持桌面结构化键、`readableBy` 与 `null` 空值；
+`guests` 补齐 `import/select/remove` 和完整信息；`GuestContext` 包含 bootstrap 契约；
+`ui.pluginUpdate.request` 和导入窗口的可选 `importerId/title` 也已声明。
+
+这些类型描述宿主契约，不会让旧 Host 或 CLI 工作台自动获得对应能力。
+Manifest 的分享入口和 Guest 展示字段还需要匹配的构建器与校验器。
+`prepareInstall/requestInstall` 保留旧声明，桌面优先使用 `guests.import`。
+
+`npm pack` 会先编译 SDK、复制必要的 ambient 声明，并检查每个 exports 目标存在。
+仓库的 `npm run test:sdk-package` 将真实 tarball 安装到空项目中，验证根入口、子路径和类型约束。
+
 面向 Ceru Music v2 的 TypeScript 类型与小型作者辅助函数。
 
 包含 PluginContext、分组 Provider、歌曲/歌词/歌单标准数据、宿主服务、权限组、Surface、资源引用、结构化错误、UI Slot、图标名和类型化 Lodash。运行能力由 Host 提供，SDK 本身不授予权限。

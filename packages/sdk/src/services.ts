@@ -10,6 +10,7 @@ import type {
 import type { LibraryPlaylist, PlaylistReference } from './library.js'
 import type { LyricsDocument } from './music.js'
 import type { PermissionGroup } from './permissions.js'
+import type { HostNavigationRequest } from './navigation.js'
 
 /** Supplied by Host actions/events. Never construct trusted intents from plugin JSON. */
 export interface ServiceCall {
@@ -20,6 +21,8 @@ export interface ServiceAvailability {
   service: string
   version: string
   available: boolean
+  /** When present, only these methods are connected by the Host. */
+  methods?: string[]
   reason?: 'host-not-connected' | 'unsupported' | 'not-logged-in' | 'disabled'
   permissionGroups: PermissionGroup[]
 }
@@ -272,11 +275,7 @@ export interface HostUI {
     }): Promise<LibraryPlaylist | null>
   }
   navigation: {
-    open(request: {
-      page: 'search' | 'playlist' | 'charts' | 'downloads' | 'account' | 'settings'
-      query?: string
-      ref?: ResourceRef
-    }): Promise<void>
+    open(request: HostNavigationRequest): Promise<void>
   }
   notifications: {
     show(request: { title: string; body: string }, call: ServiceCall): Promise<void>
@@ -292,6 +291,7 @@ export interface MenuContribution {
   id: string
   slot: 'playlist.import' | 'playlist.actions' | 'track.actions' | 'player.actions' | 'search.tools'
   title: string
+  description?: string
   commandId: string
   icon?: IconRef
   when?: { kinds?: ('track' | 'playlist')[]; loggedIn?: boolean }

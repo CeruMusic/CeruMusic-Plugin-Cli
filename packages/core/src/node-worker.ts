@@ -6,6 +6,8 @@ const timers = new Map<number, ReturnType<typeof setTimeout>>()
 let context: vm.Context
 let generation = ''
 let messages = 0
+let guestScript: string | undefined
+let guestStarted = false
 setInterval(() => {
   messages = 0
 }, 1000).unref()
@@ -20,6 +22,7 @@ parentPort!.on('message', async (message) => {
       return
     }
     generation = message.generation
+    guestScript = message.guest?.script
     context = vm.createContext(
       {
         __bridge: (encoded: string) => {
@@ -31,6 +34,20 @@ parentPort!.on('message', async (message) => {
             if (kind === 'message') {
               if (++messages > 1000) throw new Error('Plugin message rate exceeded')
               parentPort!.postMessage({ ...value, generation })
+              if (value.type === 'bootstrap-ready' && guestScript !== undefined && !guestStarted) {
+                guestStarted = true
+                setImmediate(() => {
+                  try {
+                    vm.runInContext(guestScript!, context, { timeout: 5000, filename: 'guest.js' })
+                  } catch (error) {
+                    parentPort!.postMessage({
+                      type: 'failed',
+                      generation,
+                      data: { message: error instanceof Error ? error.message : String(error) },
+                    })
+                  }
+                })
+              }
             } else if (kind === 'random') {
               if (!Number.isInteger(value) || value < 0 || value > 65536)
                 throw new Error('Invalid random byte length')
@@ -121,7 +138,13 @@ parentPort!.on('message', async (message) => {
       type: 'init',
       data: {
         generation,
-        kind: 'logic',
+        kind: message.guest ? 'guest' : 'logic',
+        guest: message.guest
+          ? {
+              id: message.guest.id,
+              info: { ...message.guest.info, rawScript: message.guest.script },
+            }
+          : undefined,
         mode: 'production',
         manifest: message.manifest,
         resources: message.resources,

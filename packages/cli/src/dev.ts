@@ -17,6 +17,7 @@ import {
   resolveArtifactConfig,
 } from '@shiqianjiang/ceru-plugin-issuer'
 import { buildProject } from './project.js'
+import { DevelopmentStorage } from './storage.js'
 
 const asset = (name: string) => fileURLToPath(new URL('../assets/' + name, import.meta.url))
 function mergeConfig(base: Record<string, any>, override: Record<string, any>) {
@@ -277,11 +278,10 @@ export async function runDev(
     if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error
   }
   const grants = new Map<string, { name: string }>()
-  const effectiveConfig = () =>
-    mergeConfig(resolveArtifactConfig(artifact.header), configOverride)
+  const effectiveConfig = () => mergeConfig(resolveArtifactConfig(artifact.header), configOverride)
   const sockets = new SocketBroker()
   const operations = new Map<string, AbortController>()
-  const storage = new Map<string, unknown>()
+  let storage = new DevelopmentStorage(root, artifact.header.manifest.id)
   const rebuild = async () => {
     if (running) {
       dirty = true
@@ -293,6 +293,7 @@ export async function runDev(
       try {
         build = await prepare()
         artifact = readArtifact(await readFile(build.path))
+        storage = new DevelopmentStorage(root, artifact.header.manifest.id)
         revision++
         error = null
         sockets.closeAll()
@@ -476,18 +477,14 @@ export async function runDev(
             })
             return
           }
-          if (input.method === 'storage.get') {
-            json(200, { value: storage.get(data.key) ?? null })
-            return
-          }
-          if (input.method === 'storage.set') {
-            storage.set(String(data.key), data.value)
-            json(200, { value: null })
-            return
-          }
-          if (input.method === 'storage.delete') {
-            storage.delete(String(data.key))
-            json(200, { value: null })
+          if (['storage.get', 'storage.set', 'storage.delete'].includes(input.method)) {
+            json(200, {
+              value: await storage.invoke(
+                input.method.slice(8) as 'get' | 'set' | 'delete',
+                data.key,
+                data.value,
+              ),
+            })
             return
           }
           if (input.method === 'permissions.query') {
@@ -610,13 +607,13 @@ export async function runDev(
           'Content-Security-Policy',
           "default-src 'none'; script-src 'self' 'nonce-" +
             nonce +
-            "'; style-src 'self'; img-src 'self' data:; media-src 'self' http: https: data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+            "'; style-src 'self'; img-src 'self' data: http: https:; media-src 'self' http: https: data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
         )
       } else if (url.pathname === '/sandbox.html') {
         const moduleId = url.searchParams.get('module') ?? ''
         if (!Object.hasOwn(build.devModules, moduleId)) throw new Error('Unknown module')
         contents =
-          '<!doctype html><meta charset="utf-8"><div id="plugin-root"></div><script nonce="' +
+          '<!doctype html><meta charset="utf-8"><style>html,body{margin:0}</style><div id="plugin-root"></div><script nonce="' +
           nonce +
           '" src="/sandbox.js"></script>' +
           '<script nonce="' +
@@ -640,6 +637,7 @@ export async function runDev(
         const file = (
           {
             '/playground.js': 'playground.js',
+            '/native-view.js': 'native-view.js',
             '/core-contracts.js': 'core-contracts.js',
             '/style.css': 'style.css',
             '/sandbox.js': 'sandbox.js',

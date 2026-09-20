@@ -2,7 +2,9 @@
 
 澜音插件开发工具链：TypeScript、Vue、React、单文件构建、Electron 调试工作台和动态发放。
 
-这是 v2 协议的开发工具链。调试工作台会实际运行插件；当前音乐软件的 v1 Host 不能直接安装 v2 产物，正式桌面 Host 需要实现对应协议。
+这是 v2 协议的开发工具链。调试工作台会实际运行插件；正式桌面 Host 需要实现对应协议。0.3.3 提供完整原生 Surface、账号菜单贡献、登录弹框关闭及浏览器播放服务桥接，参见[原生 UI 教程](docs/NATIVE-SURFACES.md)。
+
+0.3.5 新增 `playlistSections` 和 `sectionId` 导航，将插件个人歌单直接放入 Host 现有本地／云歌单页。`connected-library` 模板和独立工作台包含对应示例。
 
 也可以从源码运行：npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
 
@@ -17,7 +19,7 @@ npm install
 npm run dev
 ```
 
-保存源码后进行类型检查并重载插件。工作台提供命令调用、搜索/解析测试、Schema/Web Surface 预览、运行日志、权限模拟、共享资源目录和源码调试。
+保存源码后进行类型检查并重载插件。工作台提供命令调用、搜索/解析测试、Native/Schema/Web Surface 预览、运行日志、权限模拟、共享资源目录和源码调试。
 
 ![Electron 开发工作台](docs/screenshots/playground.png)
 

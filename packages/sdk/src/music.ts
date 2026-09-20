@@ -32,6 +32,8 @@ export interface TrackMetadata {
   artists: string[]
   album?: { id?: string; title: string }
   qualities?: string[]
+  /** Actual file sizes in bytes, keyed by the same IDs as qualities. Omit unknown sizes. */
+  qualitySizes?: Record<string, number>
   artworkUrl?: string
   durationMs?: number
 }
@@ -71,6 +73,13 @@ export function assertResourceRef(value: unknown): asserts value is ResourceRef 
     )
   )
     throw new Error('Invalid resource reference')
+  if (value.connectionId !== undefined && (!text(value.connectionId, 2048) || !value.connectionId))
+    throw new Error('Invalid resource connection')
+  if (
+    value.scope !== undefined &&
+    (value.scope !== 'provider' || value.kind !== 'track' || value.connectionId !== undefined)
+  )
+    throw new Error('Provider scope requires a public track without a connection')
   if (value.data !== undefined) {
     if (!record(value.data)) throw new Error('Invalid resource private data')
     let encoded: string
@@ -82,6 +91,16 @@ export function assertResourceRef(value: unknown): asserts value is ResourceRef 
     if (new TextEncoder().encode(encoded).byteLength > 64 * 1024)
       throw new Error('Resource private data exceeds 64 KiB')
   }
+}
+
+/** Retarget a public track without disclosing the original plugin's private data. */
+export function retargetTrackRef(ref: ResourceRef, pluginId: string): ResourceRef {
+  assertResourceRef(ref)
+  if (ref.kind !== 'track') throw new Error('Expected a track reference')
+  if (!text(pluginId, 2048) || !pluginId) throw new Error('Invalid target plugin')
+  if (ref.pluginId === pluginId) return ref
+  if (ref.scope !== 'provider') throw new Error('Private tracks must stay with their owner')
+  return { pluginId, providerId: ref.providerId, kind: 'track', id: ref.id, scope: 'provider' }
 }
 
 export function assertContentPage(value: unknown): void {
@@ -107,6 +126,16 @@ export function assertContentPage(value: unknown): void {
         throw new Error('Track metadata must contain artists')
       if (item.metadata.durationMs !== undefined && !milliseconds(item.metadata.durationMs))
         throw new Error('Invalid track duration')
+      const { qualities, qualitySizes } = item.metadata
+      if (qualities !== undefined &&
+          (!Array.isArray(qualities) || qualities.length > 128 ||
+           !qualities.every((quality: unknown) => text(quality, 128) && !!quality)))
+        throw new Error('Invalid track qualities')
+      if (qualitySizes !== undefined &&
+          (!record(qualitySizes) || Object.keys(qualitySizes).length > 128 ||
+           Object.entries(qualitySizes).some(([quality, bytes]) =>
+             !qualities?.includes(quality) || !Number.isSafeInteger(bytes) || Number(bytes) <= 0)))
+        throw new Error('Invalid track quality sizes')
     }
     if (item.ref.kind === 'playlist' && item.playlist !== undefined) {
       if (!record(item.playlist)) throw new Error('Invalid playlist metadata')
@@ -129,6 +158,20 @@ export function assertResolveResult(value: unknown): asserts value is ResolveRes
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid playback protocol')
     if (value.expiresAt !== undefined && !milliseconds(value.expiresAt))
       throw new Error('Invalid playback expiry')
+    if (value.requestHeaders !== undefined) {
+      if (!record(value.requestHeaders) || Object.keys(value.requestHeaders).length > 32)
+        throw new Error('Invalid playback request headers')
+      for (const [name, headerValue] of Object.entries(value.requestHeaders)) {
+        if (
+          !/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(name) ||
+          /^(host|connection|content-length|transfer-encoding|proxy-.*|upgrade)$/i.test(name) ||
+          typeof headerValue !== 'string' ||
+          headerValue.length > 8192 ||
+          /[\r\n]/.test(headerValue)
+        )
+          throw new Error('Invalid playback request header')
+      }
+    }
     return
   }
   if (!record(value.error) || !text(value.error.code, 128) || !text(value.error.message, 65536))

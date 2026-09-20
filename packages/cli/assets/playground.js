@@ -1,10 +1,14 @@
 import {
   assertContentPage,
+  assertAccountSummary,
+  assertNavigationRequest,
   assertLyricsDocument,
   assertResolveResult,
   PERMISSION_GROUPS,
   permissionGroup,
+  SurfaceSession,
 } from './core-contracts.js'
+import { NativeSurfacePreview, PlaylistPagePreview } from './native-view.js'
 const $ = (id) => document.getElementById(id)
 let state,
   revision = 0,
@@ -12,10 +16,18 @@ let state,
   stopped = false,
   viewId = null,
   currentInvocation
+let viewSession
+let nativePreview
+let viewMountInfo
+let playlistPagePreview
+const PLAYLIST_PAGE = Symbol('Host playlist page')
+let viewTransition = Promise.resolve()
 const frames = new Map(),
   calls = new Map(),
   registrations = new Map(),
   surfaceStates = new Map()
+const accountButtons = new Map()
+const accountLogoutButtons = new Map()
 const api = async (path, data) => {
   const response = await fetch('/api/' + path, {
     method: data === undefined ? 'GET' : 'POST',
@@ -51,9 +63,16 @@ function post(frame, type, data) {
   frame.element.contentWindow?.postMessage({ type, data, generation: frame.generation }, '*')
 }
 function removeFrames() {
+  void playlistPagePreview?.close().catch(error => log('error', error.message))
+  playlistPagePreview = undefined
+  nativePreview?.dispose()
+  nativePreview = undefined
+  $('preview').replaceChildren()
+  void viewSession?.close().catch(error => log('error', error.message))
+  viewSession = undefined
   void api('rpc', { method: 'sockets.closeAll' }).catch(() => {})
   document.getElementById('host-playlist-import')?.remove()
-  for (const frame of frames.values()) frame.element.remove()
+  for (const frame of frames.values()) { post(frame, 'dispose'); frame.element.remove() }
   frames.clear()
   registrations.clear()
   for (const call of calls.values()) {
@@ -61,6 +80,7 @@ function removeFrames() {
     call.reject(new Error('Plugin reloaded or stopped'))
   }
   calls.clear()
+  surfaceStates.clear()
   currentInvocation = null
   $('results').replaceChildren()
   $('result-detail').textContent = ''
@@ -89,7 +109,7 @@ function start() {
   $('status').textContent = '加载中'
   if (state.manifest.modules.logic) mount(state.manifest.modules.logic.entry, 'logic', $('runners'))
   else $('status').textContent = '无后台入口'
-  if (viewId) showView(viewId)
+  // Views open only after logic activation, when their actions have registered.
   updateSearchControls()
 }
 function hasProtocol(providerId, protocol) {
@@ -183,14 +203,24 @@ function drawRegistrations() {
     $('registrations').textContent = stopped ? '插件已停止' : '等待后台模块注册命令或能力'
   updateSearchControls()
 }
-function invoke(frame, kind, target, method, args) {
+function invoke(frame, kind, target, method, args, signal) {
   const id = 'call-' + ++sequence
   currentInvocation = { frame, id }
   log('info', { call: kind === 'action' ? target : target + '.' + method })
   return new Promise((resolve, reject) => {
+    const cancel = () => {
+      const call = calls.get(id)
+      if (!call) return
+      clearTimeout(call.timer)
+      calls.delete(id)
+      post(frame, 'cancel', { id })
+      reject(new Error('Surface invocation cancelled'))
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
     calls.set(id, {
       frame,
       resolve: (value) => {
+        signal?.removeEventListener('abort', cancel)
         try {
           if (
             kind === 'playlist-importer' ||
@@ -203,14 +233,16 @@ function invoke(frame, kind, target, method, args) {
           resolve(value)
         } catch (error) { reject(error) }
       },
-      reject,
+      reject: error => { signal?.removeEventListener('abort', cancel); reject(error) },
       timer: setTimeout(() => {
         calls.delete(id)
         updateSearchControls()
         post(frame, 'cancel', { id })
+        signal?.removeEventListener('abort', cancel)
         reject(new Error('Invocation timed out'))
       }, 20000),
     })
+    if (signal?.aborted) { cancel(); return }
     updateSearchControls()
     post(frame, 'invoke', { id, kind, target, method, args })
   })
@@ -227,10 +259,10 @@ function showResult(value) {
   }
   return value
 }
-function runAction(action, input) {
+function runAction(action, input = {}, signal) {
   const item = registrations.get('action:' + action)
   if (!item) return Promise.reject(new Error('Action is not registered: ' + action))
-  return invoke(item.frame, 'action', action, '', [input])
+  return invoke(item.frame, 'action', action, '', [input], signal)
 }
 
 // A single Host-owned preview for all importers. Plugins contribute data callbacks only.
@@ -324,6 +356,38 @@ function renderSchema(node, values, container) {
   container.append(text)
 }
 function showView(id, mountInfo = { kind: 'page' }) {
+  viewTransition = viewTransition.catch(() => {}).then(async () => {
+    await closeView()
+    if (stopped) return
+    viewMountInfo = mountInfo
+    const logicEntry = state.manifest.modules.logic?.entry
+    if (logicEntry && !frames.get(logicEntry)?.active) {
+      viewId = id
+      $('preview').textContent = '正在启动插件…'
+      return
+    }
+    mountView(id, mountInfo)
+  })
+  return viewTransition.catch(error => log('error', error.message))
+}
+async function closeView() {
+  const previousPlaylistPage = playlistPagePreview
+  playlistPagePreview = undefined
+  nativePreview?.dispose()
+  nativePreview = undefined
+  const previous = viewSession
+  viewSession = undefined
+  viewId = null
+  for (const [key, frame] of frames) if (frame.kind !== 'logic') {
+    post(frame, 'dispose')
+    frame.element.remove()
+    frames.delete(key)
+  }
+  $('preview').replaceChildren()
+  await previous?.close()
+  await previousPlaylistPage?.close()
+}
+function mountView(id, mountInfo) {
   viewId = id
   for (const [key, frame] of frames)
     if (frame.kind !== 'logic') {
@@ -331,8 +395,34 @@ function showView(id, mountInfo = { kind: 'page' }) {
       frames.delete(key)
     }
   $('preview').replaceChildren()
+  if (id === PLAYLIST_PAGE) {
+    playlistPagePreview = new PlaylistPagePreview($('preview'), state.manifest, runAction, error => log('error', error.message))
+    void playlistPagePreview.open(mountInfo.sectionId).catch(error => log('error', error.message))
+    return
+  }
   const view = state.manifest.modules.surfaces?.find((v) => v.id === id)
-  if (view?.kind === 'web') mount(view.entry, 'web', $('preview'), mountInfo)
+  if (view?.kind === 'web') {
+    viewSession = new SurfaceSession(view, state.manifest, runAction)
+    const frame = mount(view.entry, 'web', $('preview'), mountInfo)
+    frame.surfaceId = id
+    frame.session = viewSession
+    if (view.presentation?.kind === 'modal') {
+      frame.element.style.width = (view.presentation.size ?? 480) + 'px'
+      frame.element.style.maxWidth = '100%'
+      frame.element.style.display = 'block'
+      frame.element.style.marginInline = 'auto'
+      frame.element.scrollIntoView({ block: 'center' })
+    }
+  }
+  else if (view?.kind === 'native') {
+    viewSession = new SurfaceSession(view, state.manifest, runAction)
+    nativePreview = new NativeSurfacePreview(
+      $('preview'), viewSession,
+      new Set(state.manifest.contributes?.commands?.map(command => command.action)),
+      error => log('error', error.message),
+    )
+    void nativePreview.open()
+  }
   else if (view?.kind === 'schema')
     renderSchema(
       state.resources[view.entry]?.value?.root,
@@ -349,6 +439,43 @@ function drawStatic() {
   $('plugin-meta').textContent =
     state.manifest.id + ' · v' + state.manifest.version + ' · revision ' + revision
   $('views').replaceChildren()
+  const playlistPage = document.createElement('button')
+  playlistPage.textContent = '歌单页 · 本地与云歌单'
+  playlistPage.onclick = () => showView(PLAYLIST_PAGE)
+  $('views').append(playlistPage)
+  for (const section of [...(state.manifest.contributes?.playlistSections ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    const button = document.createElement('button')
+    button.textContent = '歌单页 · ' + section.title
+    button.onclick = () => showView(PLAYLIST_PAGE, { kind: 'page', sectionId: section.id })
+    $('views').append(button)
+  }
+  accountButtons.clear()
+  accountLogoutButtons.clear()
+  for (const account of state.manifest.contributes?.accountItems ?? []) {
+    const item = document.createElement('div')
+    item.className = 'account-item'
+    const button = document.createElement('button')
+    button.textContent = '账号 · ' + account.title
+    button.onclick = () => showView(account.view)
+    button.disabled = true
+    accountButtons.set(account.id, button)
+    item.append(button)
+    if (account.logoutAction) {
+      const logout = document.createElement('button')
+      logout.textContent = '退出登录'
+      logout.className = 'account-logout'
+      logout.hidden = true
+      logout.onclick = async () => {
+        logout.disabled = true
+        try { await runAction(account.logoutAction); await refreshAccountItems(account.view) }
+        catch (error) { log('error', error.message) }
+        finally { logout.disabled = false }
+      }
+      accountLogoutButtons.set(account.id, logout)
+      item.append(logout)
+    }
+    $('views').append(item)
+  }
   for (const view of [
     ...(state.manifest.modules.surfaces || []),
     ...(state.manifest.contributes?.guestAdapters || []),
@@ -470,6 +597,25 @@ function drawStatic() {
     $('static-assets').append(card)
   }
 }
+async function refreshAccountItems(surfaceId) {
+  await Promise.all((state.manifest.contributes?.accountItems ?? []).map(async account => {
+    if ((surfaceId && account.view !== surfaceId) || !registrations.has('action:' + account.action)) return
+    const button = accountButtons.get(account.id)
+    if (!button) return
+    try {
+      const summary = await runAction(account.action)
+      assertAccountSummary(summary)
+      button.textContent = '账号 · ' + summary.displayName + (summary.badge ? ' · ' + summary.badge : '')
+      button.disabled = false
+      const logout = accountLogoutButtons.get(account.id)
+      if (logout) logout.hidden = !summary.signedIn
+    } catch (error) {
+      button.textContent = '账号 · ' + account.title
+      button.disabled = false
+      log('error', error.message)
+    }
+  }))
+}
 window.addEventListener('message', async (event) => {
   const frame = [...frames.values()].find((f) => f.element.contentWindow === event.source)
   if (!frame || !event.data?.type) return
@@ -478,7 +624,7 @@ window.addEventListener('message', async (event) => {
     post(frame, 'init', {
       generation: frame.generation,
       kind: frame.kind,
-      manifest: state.manifest,
+      manifest: frame.kind === 'web' ? { ...state.manifest, config: {} } : state.manifest,
       catalog: state.catalog,
       resources: state.resources,
       mount: frame.mountInfo,
@@ -487,12 +633,24 @@ window.addEventListener('message', async (event) => {
   }
   if (message.generation !== frame.generation) return
   const data = message.data
+  if (message.type === 'resize' && frame.kind === 'web' &&
+    Number.isFinite(data?.height) && data.height >= 1 && data.height <= 16384) {
+    frame.element.style.minHeight = '0'
+    frame.element.style.height = Math.min(Math.max(120, data.height), Math.max(160, window.innerHeight - 160)) + 'px'
+  }
   if (message.type === 'active') {
     frame.active = true
     frame.failed = false
     $('status').textContent = '运行中'
     log('info', frame.moduleId + ' activated')
     drawRegistrations()
+    if (frame.kind === 'web') {
+      post(frame, 'state', surfaceStates.get(frame.surfaceId) ?? {})
+      void frame.session.open().catch(error => log('error', error.message))
+    } else if (frame.kind === 'logic') {
+      void refreshAccountItems()
+      if (viewId) void showView(viewId, viewMountInfo)
+    }
   }
   if (message.type === 'failed') {
     frame.failed = true
@@ -506,7 +664,11 @@ window.addEventListener('message', async (event) => {
   }
   if (message.type === 'log') log(data.level, data.values)
   if (message.type === 'notify') log(data.level, data.message)
-  if (message.type === 'open-view') showView(data.surfaceId)
+  if (message.type === 'open-view' && frame.kind === 'logic') void showView(data.surfaceId)
+  if (message.type === 'close-view' &&
+    ((frame.kind === 'logic' && data.surfaceId === viewId) ||
+      (frame.kind === 'web' && frame.surfaceId === viewId)))
+    void closeView().catch(error => log('error', error.message))
   if (message.type === 'register') {
     if (frame.kind !== 'logic') return
     const valid =
@@ -526,8 +688,12 @@ window.addEventListener('message', async (event) => {
     drawRegistrations()
   }
   if (message.type === 'state' && frame.kind === 'logic') {
+    const changed = JSON.stringify(surfaceStates.get(data.surfaceId)) !== JSON.stringify(data.state)
     surfaceStates.set(data.surfaceId, data.state)
-    for (const view of frames.values()) if (view.kind === 'web') post(view, 'state', data.state)
+    if (changed) void playlistPagePreview?.refresh(data.surfaceId)
+    if (changed) void refreshAccountItems(data.surfaceId)
+    if (changed && viewId === data.surfaceId) void nativePreview?.refresh()
+    for (const view of frames.values()) if (view.kind === 'web' && view.surfaceId === data.surfaceId) post(view, 'state', data.state)
     if (
       viewId === data.surfaceId &&
       state.manifest.modules.surfaces?.find((v) => v.id === viewId)?.kind === 'schema'
@@ -547,7 +713,7 @@ window.addEventListener('message', async (event) => {
     try {
       let value
       if (data.method === 'surface.invoke' && frame.kind === 'web')
-        value = showResult(await runAction(data.data.action, data.data.input))
+        value = await frame.session.invoke(data.data.action, data.data.input ?? {})
       else if (frame.kind !== 'logic')
         throw new Error('This Surface/Guest cannot call a logic Host API directly')
       else if (data.method === 'permissions.requestGroup') {
@@ -589,7 +755,10 @@ window.addEventListener('message', async (event) => {
       else if (data.method === 'ui.dialogs.prompt')
         value = prompt(data.data.label || data.data.title || '请输入', data.data.value || '')
       else if (data.method === 'ui.navigation.open') {
+        assertNavigationRequest(data.data, state.manifest)
         log('info', { navigation: data.data })
+        if (data.data.page === 'playlist' && !data.data.ref)
+          void showView(PLAYLIST_PAGE, { kind: 'page', sectionId: data.data.sectionId })
         value = null
       }
       else if (data.method === 'ui.playlistImport.open') {
@@ -670,6 +839,7 @@ $('stop').onclick = () => {
   $('status').textContent = '已停止'
 }
 $('clear-log').onclick = () => $('logs').replaceChildren()
+$('close-view').onclick = () => { void closeView().catch(error => log('error', error.message)) }
 $('apply-config').onclick = async () => {
   try {
     await api('config', JSON.parse($('config').value))

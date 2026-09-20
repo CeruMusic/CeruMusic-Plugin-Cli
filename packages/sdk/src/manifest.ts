@@ -31,8 +31,18 @@ export interface ProviderDeclaration {
 }
 export interface SurfaceDeclaration {
   id: string
-  kind: 'schema' | 'web'
+  kind: 'schema' | 'web' | 'native'
+  /** Native: declared action returning NativeView; Web: module; Schema: JSON resource. */
   entry: string
+  /** Host chrome only. The plugin owns all content inside a web Surface. */
+  title?: string
+  presentation?: {
+    kind: 'drawer' | 'modal'
+    placement?: 'left' | 'right' | 'top' | 'bottom'
+    size?: number
+  }
+  /** Declared logic actions. Open runs after mounting; close runs once per session. */
+  lifecycle?: { openAction?: string; closeAction?: string }
 }
 export type HomeSectionKind = 'playlists' | 'charts' | 'custom'
 export type UISlotName =
@@ -90,6 +100,13 @@ export interface PluginManifest {
   }
   modules: {
     logic?: { entry: string; activation?: string[] }
+    /** Separate server-side playback resolver. Requires a compatible builder and share Host. */
+    share?: {
+      entry: string
+      configKeys?: string[]
+      guestAdapterId?: string
+      guestGlobals?: string[]
+    }
     surfaces?: SurfaceDeclaration[]
   }
   contributes?: {
@@ -101,6 +118,8 @@ export interface PluginManifest {
     providers?: ProviderDeclaration[]
     /** Home tabs exist only while at least one enabled plugin contributes them. */
     homeSections?: HomeSectionContribution[]
+    /** Native sections inside the Host's existing local/cloud playlist page. */
+    playlistSections?: { id: string; title: string; view: string; order?: number }[]
     /** Controlled UI composition. The Host owns the target DOM and lifecycle. */
     uiExtensions?: UIExtensionContribution[]
     /** Surface/slot styles are scoped. Application styles require ui.styles.global. */
@@ -116,12 +135,17 @@ export interface PluginManifest {
       description?: string
       placeholder?: string
     }[]
-    commands?: { id: string; title: string; action: string; view?: string }[]
+    commands?: { id: string; title: string; description?: string; action: string; view?: string }[]
+    /** Subaccounts in the Host account menu. action returns AccountSummary; view owns login UI. */
+    accountItems?: { id: string; title: string; view: string; action: string; logoutAction?: string }[]
     sidebarItems?: { id: string; group: string; title: string; view: string }[]
     settingsPages?: { id: string; title: string; view: string }[]
     guestAdapters?: {
       id: string
+      title?: string
+      extensions?: string[]
       format: string
+      badge?: { label: string; backgroundColor: string; textColor: string }
       compatibilityProfile: string
       bootstrap: string
       runtime: string

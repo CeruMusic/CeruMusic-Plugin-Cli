@@ -208,14 +208,30 @@ export const MANIFEST_SCHEMA = object(
     ),
     modules: object({
       logic: object({ entry: id, activation: strings }, ['entry']),
+      share: object({ entry: id, configKeys: strings, guestAdapterId: id, guestGlobals: strings }, [
+        'entry',
+      ]),
       surfaces: {
         type: 'array',
         maxItems: 64,
-        items: object({ id, kind: { enum: ['schema', 'web'] }, entry: id }, [
-          'id',
-          'kind',
-          'entry',
-        ]),
+        items: object(
+          {
+            id,
+            kind: { enum: ['schema', 'web', 'native'] },
+            entry: id,
+            title: { type: 'string', minLength: 1, maxLength: 100 },
+            presentation: object(
+              {
+                kind: { enum: ['drawer', 'modal'] },
+                placement: { enum: ['left', 'right', 'top', 'bottom'] },
+                size: { type: 'integer', minimum: 280, maximum: 1200 },
+              },
+              ['kind'],
+            ),
+            lifecycle: object({ openAction: id, closeAction: id }),
+          },
+          ['id', 'kind', 'entry'],
+        ),
       },
     }),
     contributes: object({
@@ -245,6 +261,7 @@ export const MANIFEST_SCHEMA = object(
             id,
             title: string,
             commandId: id,
+            description: string,
             slot: {
               enum: [
                 'playlist.import',
@@ -266,6 +283,19 @@ export const MANIFEST_SCHEMA = object(
             }),
           },
           ['id', 'slot', 'title', 'commandId'],
+        ),
+      },
+      accountItems: {
+        type: 'array',
+        maxItems: 16,
+        items: object({ id, title: string, view: id, action: id, logoutAction: id }, ['id', 'title', 'view', 'action']),
+      },
+      playlistSections: {
+        type: 'array',
+        maxItems: 32,
+        items: object(
+          { id, title: string, view: id, order: { type: 'integer', minimum: -1000, maximum: 1000 } },
+          ['id', 'title', 'view'],
         ),
       },
       homeSections: {
@@ -387,7 +417,11 @@ export const MANIFEST_SCHEMA = object(
       commands: {
         type: 'array',
         maxItems: 128,
-        items: object({ id, title: string, action: id, view: id }, ['id', 'title', 'action']),
+        items: object({ id, title: string, description: string, action: id, view: id }, [
+          'id',
+          'title',
+          'action',
+        ]),
       },
       sidebarItems: {
         type: 'array',
@@ -407,6 +441,22 @@ export const MANIFEST_SCHEMA = object(
             id,
             format: string,
             compatibilityProfile: string,
+            title: string,
+            extensions: strings,
+            badge: object(
+              {
+                label: { type: 'string', minLength: 1, maxLength: 24 },
+                backgroundColor: {
+                  type: 'string',
+                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
+                },
+                textColor: {
+                  type: 'string',
+                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
+                },
+              },
+              ['label', 'backgroundColor', 'textColor'],
+            ),
             bootstrap: id,
             runtime: { const: 'ceru-js@1' },
             projectableProtocols: strings,
@@ -473,6 +523,43 @@ export function validateManifest(value: unknown): asserts value is PluginManifes
       'contribution id',
     )
   const views = new Set(manifest.modules.surfaces?.map((p) => p.id))
+  const actions = new Set(manifest.contributes?.commands?.map((command) => command.action))
+  for (const surface of manifest.modules.surfaces ?? []) {
+    if (surface.kind === 'native') {
+      ensure(manifest.modules.logic, 'Native surfaces require a logic module')
+      ensure(actions.has(surface.entry), 'Missing native render action: ' + surface.entry)
+    }
+    for (const action of Object.values(surface.lifecycle ?? {}))
+      ensure(actions.has(action), 'Unknown surface lifecycle action: ' + action)
+  }
+  for (const account of manifest.contributes?.accountItems ?? []) {
+    ensure(manifest.modules.logic, 'Account items require a logic module')
+    ensure(views.has(account.view), 'Unknown account view: ' + account.view)
+    ensure(actions.has(account.action), 'Unknown account summary action: ' + account.action)
+    if (account.logoutAction)
+      ensure(actions.has(account.logoutAction), 'Unknown account logout action: ' + account.logoutAction)
+  }
+  for (const section of manifest.contributes?.playlistSections ?? [])
+    ensure(
+      manifest.modules.surfaces?.some(surface => surface.id === section.view && surface.kind === 'native'),
+      'Playlist section requires a declared native view: ' + section.view,
+    )
+  const share = manifest.modules.share
+  if (share?.guestAdapterId)
+    ensure(
+      manifest.contributes?.guestAdapters?.some((adapter) => adapter.id === share.guestAdapterId),
+      'Unknown share guest adapter: ' + share.guestAdapterId,
+    )
+  for (const name of share?.guestGlobals ?? [])
+    ensure(
+      /^[a-zA-Z_$][\w$]*$/.test(name) && !['globalThis', 'arguments', 'eval'].includes(name),
+      'Invalid share guest global: ' + name,
+    )
+  for (const menu of manifest.contributes?.menus ?? [])
+    ensure(
+      manifest.contributes?.commands?.some((command) => command.id === menu.commandId),
+      'Unknown menu command: ' + menu.commandId,
+    )
   for (const items of [
     manifest.contributes?.commands,
     manifest.contributes?.sidebarItems,
@@ -1012,8 +1099,10 @@ function inspectBody(
     declared.add(entry)
   }
   if (manifest.modules.logic) add(manifest.modules.logic.entry)
+  if (manifest.modules.share) add(manifest.modules.share.entry)
   for (const surface of manifest.modules.surfaces ?? []) {
     if (surface.kind === 'web') add(surface.entry)
+    else if (surface.kind === 'native') ensure(manifest.contributes?.commands?.some(command => command.action === surface.entry), 'Missing native render action: ' + surface.entry)
     else
       ensure(resources[surface.entry]?.type === 'json', 'Missing schema resource: ' + surface.entry)
   }

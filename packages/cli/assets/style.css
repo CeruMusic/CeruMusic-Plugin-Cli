@@ -111,6 +111,17 @@ textarea {
 aside button {
   margin: 4px 0;
 }
+.account-item { position: relative; }
+.account-logout {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  z-index: 5;
+  white-space: nowrap;
+}
+.account-item:hover .account-logout:not([hidden]),
+.account-item:focus-within .account-logout:not([hidden]) { display: block; }
 aside .item {
   display: flex;
   align-items: center;
@@ -186,6 +197,52 @@ pre {
 .preview {
   min-height: 150px;
 }
+.native-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.native-section { margin: 20px 0; }
+.native-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 20px;
+}
+.native-item { min-width: 0; }
+.native-item-title {
+  display: block;
+  padding: 0;
+  margin: 8px 0;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+}
+.native-item .hint {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.native-artwork {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--line);
+}
+.native-list .native-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+.native-list .native-item-content { display: flex; gap: 12px; align-items: center; }
+.native-list .native-artwork { width: 48px; flex-shrink: 0; }
 .preview iframe {
   width: 100%;
   min-height: 280px;

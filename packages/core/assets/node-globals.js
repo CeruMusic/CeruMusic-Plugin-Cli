@@ -1831,7 +1831,6 @@
         this.query = result;
         this.changed?.(result);
       }
-      ;
       return result;
     }
     get(key) {
@@ -1871,7 +1870,10 @@
   var SafeURL = class {
     value;
     constructor(url, base) {
-      this.value = native("url", { url: String(url), base: base === void 0 ? void 0 : String(base) });
+      this.value = native("url", {
+        url: String(url),
+        base: base === void 0 ? void 0 : String(base)
+      });
     }
     get href() {
       return this.value.href;
@@ -2011,10 +2013,12 @@
           if (!timer.repeat) timers.delete(data.id);
           timer.callback(...timer.args);
         }
-        ;
         return;
       }
-      for (const listener of listeners) Promise.resolve(listener({ source: globalThis.parent, data })).catch((error) => native("message", { type: "log", data: { level: "error", values: [String(error)] } }));
+      for (const listener of listeners)
+        Promise.resolve(listener({ source: globalThis.parent, data })).catch(
+          (error) => native("message", { type: "log", data: { level: "error", values: [String(error)] } })
+        );
     }
   });
 })();

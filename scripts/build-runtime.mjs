@@ -2,13 +2,7 @@ import { build } from 'esbuild'
 import { mkdir, writeFile, readFile, unlink, copyFile } from 'node:fs/promises'
 import { MANIFEST_SCHEMA } from '../packages/issuer/dist/index.js'
 import { HOST_ICON_NAMES } from '../packages/sdk/dist/index.js'
-await copyFile('packages/sdk/src/host-modules.d.ts', 'packages/sdk/dist/host-modules.d.ts')
-const sdkDeclarations = await readFile('packages/sdk/dist/index.d.ts', 'utf8')
-if (!sdkDeclarations.startsWith('/// <reference path="./host-modules.d.ts" />'))
-  await writeFile(
-    'packages/sdk/dist/index.d.ts',
-    '/// <reference path="./host-modules.d.ts" />\n' + sdkDeclarations,
-  )
+await import('../packages/sdk/scripts/prepare-package.mjs')
 await build({
   entryPoints: ['packages/cli/runtime/sandbox.ts'],
   bundle: true,
@@ -21,13 +15,20 @@ await build({
   legalComments: 'inline',
 })
 await mkdir('packages/core/assets', { recursive: true })
-await build({ entryPoints: ['packages/core/runtime/node-globals.ts'], bundle: true, outfile: 'packages/core/assets/node-globals.js', platform: 'browser', format: 'iife', target: 'es2022' })
+await build({
+  entryPoints: ['packages/core/runtime/node-globals.ts'],
+  bundle: true,
+  outfile: 'packages/core/assets/node-globals.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+})
 await copyFile('packages/cli/assets/sandbox.js', 'packages/core/assets/sandbox.js')
 await copyFile('packages/cli/assets/catalog.json', 'packages/core/assets/catalog.json')
 await build({
   stdin: {
     contents:
-      "export * from './packages/sdk/src/music.ts'; export * from './packages/sdk/src/permissions.ts';",
+      "export * from './packages/sdk/src/music.ts'; export * from './packages/sdk/src/native-view.ts'; export * from './packages/sdk/src/accounts.ts'; export * from './packages/sdk/src/navigation.ts'; export * from './packages/sdk/src/permissions.ts'; export * from './packages/core/src/surface.ts';",
     resolveDir: process.cwd(),
     loader: 'ts',
   },
@@ -74,7 +75,8 @@ const schema = {
         {
           type: 'string',
           pattern: '^@.+',
-          description: 'Build-time JSON/JS/TS config reference, for example @./src/plugin.config.ts.',
+          description:
+            'Build-time JSON/JS/TS config reference, for example @./src/plugin.config.ts.',
         },
       ],
     },

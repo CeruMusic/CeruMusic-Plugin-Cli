@@ -111,7 +111,7 @@ Socket.IO/`ws` 库只在 Host 中。插件获得 `on`、`emit`、`send`、`disco
 
 ## 播放解析：返回直链
 
-`provider.tracks.resolve()` 直接返回 `{ ok: true, url, expiresAt? }`。软件播放器使用该地址，不创建代理租约、不经过 Core 转发，也不按媒体域名再次申请权限。插件负责确保地址可播放并在需要时提供到期时间；失败返回标准 `MusicFault`，可用 `recovery.mode` 表达限流、卡密过期和是否暂停自动换源。分享协议不会自动公开这个播放直链。
+`provider.tracks.resolve()` 直接返回 `{ ok: true, url, expiresAt?, requestHeaders? }`。软件播放器使用该地址，不创建代理租约、不经过 Core 转发，也不按媒体域名再次申请权限。需要防盗链或认证请求头时，插件通过 `requestHeaders` 声明；Host 只对该完整临时 URL 附加这些值，不把它们发送给渲染页面，并在到期后清除。插件负责确保地址可播放并在需要时提供到期时间；失败返回标准 `MusicFault`，可用 `recovery.mode` 表达限流、卡密过期和是否暂停自动换源。分享协议不会自动公开这个播放直链或请求头。
 
 ## 歌单导入：注册菜单项，复用软件界面
 

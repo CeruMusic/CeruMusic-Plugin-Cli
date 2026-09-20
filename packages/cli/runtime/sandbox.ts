@@ -6,11 +6,18 @@ import * as cryptoTools from '../../sdk/src/compat/crypto.js'
 import * as compressionTools from '../../sdk/src/compat/zlib.js'
 import * as encodingTools from '../../sdk/src/compat/encoding.js'
 import { createLegacyHttpBridge } from '../../sdk/src/legacy-http'
+import { prepareRpcPayload } from './rpc'
+import { assertNavigationRequest } from '../../sdk/src/navigation'
+import { observeSurfaceSize } from './surface-size'
 
 let initialized: any
 let entry: any
 let started = false
 let sequence = 0
+let guestHandler: ((method: string, input: any, operation: any) => unknown) | undefined
+let guestReady = false
+let latestState: any
+let disposed = false
 const pending = new Map<
   string,
   { resolve: (v: any) => void; reject: (e: Error) => void; timer: any }
@@ -88,15 +95,35 @@ for (const level of ['debug', 'log', 'info', 'warn', 'error'] as const) {
 function rpc(method: string, data: any = {}): Promise<any> {
   const id = 'rpc-' + ++sequence
   return new Promise((resolve, reject) => {
+    const payload = prepareRpcPayload(data)
+    const listeners: { signal: AbortSignal; abort: () => void }[] = []
+    const cleanup = () => {
+      const request = pending.get(id)
+      if (request) clearTimeout(request.timer)
+      pending.delete(id)
+      for (const { signal, abort } of listeners) signal.removeEventListener('abort', abort)
+    }
+    const finish = (error: unknown, value?: any) => {
+      cleanup()
+      error ? reject(error) : resolve(value)
+    }
     pending.set(id, {
-      resolve,
-      reject,
+      resolve: value => finish(null, value),
+      reject: error => finish(error),
       timer: setTimeout(() => {
-        pending.delete(id)
-        reject(new Error('Host RPC timed out: ' + method))
+        finish(new Error('Host RPC timed out: ' + method))
       }, 120000),
     })
-    send('rpc', { id, method, data })
+    for (const { signal, id: operationId } of payload.operations) {
+      const abort = () => {
+        finish(new Error('Host RPC cancelled: ' + method))
+        void rpc('operations.cancel', { id: operationId }).catch(() => {})
+      }
+      listeners.push({ signal, abort })
+      signal.addEventListener('abort', abort, { once: true })
+    }
+    try { send('rpc', { id, method, data: payload.data }) }
+    catch (error) { finish(error) }
   })
 }
 function shared() {
@@ -161,17 +188,34 @@ function applySurfaceStyles(): void {
     document.head.append(style)
   }
 }
+function requestHttp(data: any) {
+  const signal: AbortSignal | undefined = data.operation?.signal
+  signal?.throwIfAborted()
+  const id = data.operation?.id ?? 'http-' + ++sequence
+  const cancel = () => {
+    void rpc('operations.cancel', { id }).catch(() => {})
+  }
+  signal?.addEventListener('abort', cancel, { once: true })
+  return rpc('http.request', {
+    ...data,
+    operation: { id, deadlineAt: data.operation?.deadlineAt },
+  }).finally(() => signal?.removeEventListener('abort', cancel))
+}
 function context() {
   const base = shared()
   if (initialized.kind === 'web') {
     applySurfaceStyles()
+    const root = document.getElementById('plugin-root')!
+    disposers.push(observeSurfaceSize(root, height => send('resize', { height })))
     return {
       ...base,
-      root: document.getElementById('plugin-root'),
+      root,
       mount: initialized.mount ?? { kind: 'page' },
       invoke: (action: string, input: any) => rpc('surface.invoke', { action, input }),
+      close: async () => { send('close-view') },
       subscribe: (handler: (state: any) => void) => {
         subscriptions.add(handler)
+        if (latestState !== undefined) handler(latestState)
         return () => subscriptions.delete(handler)
       },
     }
@@ -180,7 +224,21 @@ function context() {
     return {
       host: base.host,
       utils: base.utils,
-      guestId: 'development-guest',
+      guestId: initialized.guest?.id ?? 'development-guest',
+      scriptInfo: initialized.guest?.info ?? {},
+      ready: (metadata: any) => {
+        if (guestReady) throw new Error('Guest already initialized')
+        if (!guestHandler) throw new Error('Guest did not register a request handler')
+        guestReady = true
+        send('guest-metadata', metadata)
+        send('active')
+      },
+      handle: (handler: typeof guestHandler) => {
+        guestHandler = handler
+        return () => {
+          guestHandler = undefined
+        }
+      },
       expose: (name: string, value: any) => {
         if (['__proto__', 'constructor', 'prototype'].includes(name))
           throw new Error('Unsafe global')
@@ -204,9 +262,19 @@ function context() {
     ),
     events: {
       on: (name: string, listener: (value: any) => void) => {
-        if (!['permissions.changed', 'library.changed', 'theme.changed', 'account.changed', 'player.changed'].includes(name)) throw new Error('Event is not connected by this Host')
+        if (
+          ![
+            'permissions.changed',
+            'library.changed',
+            'theme.changed',
+            'account.changed',
+            'player.changed',
+          ].includes(name)
+        )
+          throw new Error('Event is not connected by this Host')
         const listeners = hostEvents.get(name) ?? new Set<(value: any) => void>()
-        listeners.add(listener); hostEvents.set(name, listeners)
+        listeners.add(listener)
+        hostEvents.set(name, listeners)
         return () => listeners.delete(listener)
       },
     },
@@ -224,12 +292,18 @@ function context() {
         }
       },
     },
-    lyricConverters: { register: (id: string, implementation: any) => {
-      if (!declared.contributes?.lyricConverters?.some((item: any) => item.id === id)) throw new Error('Undeclared lyric converter')
-      lyricConverters.set(id, implementation)
-      send('register', { kind: 'lyric-converter', id, methods: ['parse', 'export'] })
-      return () => { lyricConverters.delete(id); send('unregister', { kind: 'lyric-converter', id }) }
-    } },
+    lyricConverters: {
+      register: (id: string, implementation: any) => {
+        if (!declared.contributes?.lyricConverters?.some((item: any) => item.id === id))
+          throw new Error('Undeclared lyric converter')
+        lyricConverters.set(id, implementation)
+        send('register', { kind: 'lyric-converter', id, methods: ['parse', 'export'] })
+        return () => {
+          lyricConverters.delete(id)
+          send('unregister', { kind: 'lyric-converter', id })
+        }
+      },
+    },
     library: {
       playlists: Object.fromEntries(
         ['list', 'getTracks', 'import'].map((method) => [
@@ -285,11 +359,7 @@ function context() {
         createHttpClient(
           {
             http: {
-              request: (data: any) =>
-                rpc('http.request', {
-                  ...data,
-                  operation: { id: data.operation?.id, deadlineAt: data.operation?.deadlineAt },
-                }),
+              request: requestHttp,
             },
             permissions: {
               query: (data: any) => rpc('permissions.query', data),
@@ -298,11 +368,7 @@ function context() {
           },
           options,
         ),
-      request: (data: any) =>
-        rpc('http.request', {
-          ...data,
-          operation: { id: data.operation?.id, deadlineAt: data.operation?.deadlineAt },
-        }),
+      request: requestHttp,
     },
     credentials: { get: () => Promise.resolve(null) },
     sockets: {
@@ -354,7 +420,10 @@ function context() {
         prompt: (data: any) => rpc('ui.dialogs.prompt', data),
         pickPlaylist: (data: any) => rpc('ui.dialogs.pickPlaylist', data),
       },
-      navigation: { open: (data: any) => rpc('ui.navigation.open', data) },
+      navigation: { open: (data: any) => {
+        assertNavigationRequest(data, declared)
+        return rpc('ui.navigation.open', data)
+      } },
       notifications: {
         show: (data: any, call: any) => rpc('ui.notifications.show', { ...data, call }),
       },
@@ -369,6 +438,7 @@ function context() {
         return Promise.resolve()
       },
       playlistImport: { open: (data: any) => rpc('ui.playlistImport.open', data) },
+      pluginUpdate: { request: (data: any) => rpc('ui.pluginUpdate.request', data) },
       setState: (surfaceId: string, state: any) => {
         send('state', { surfaceId, state })
         return Promise.resolve()
@@ -381,6 +451,7 @@ function context() {
         send('open-view', { surfaceId })
         return Promise.resolve()
       },
+      closeView: async (surfaceId: string) => { send('close-view', { surfaceId }) },
     },
     storage: {
       get: (key: string) => rpc('storage.get', { key }),
@@ -388,7 +459,10 @@ function context() {
       delete: (key: string) => rpc('storage.delete', { key }),
     },
     guests: {
-      list: () => Promise.resolve([]),
+      list: () => rpc('guests.list'),
+      import: (adapterId: string) => rpc('guests.import', { adapterId }),
+      select: (guestId: string | null) => rpc('guests.select', { guestId }),
+      remove: (guestId: string) => rpc('guests.remove', { guestId }),
       prepareInstall: () =>
         Promise.reject(
           new Error(
@@ -397,7 +471,13 @@ function context() {
         ),
       requestInstall: () =>
         Promise.reject(new Error('Guest installation is unavailable in this playground.')),
-      invoke: () => Promise.reject(new Error('No Guest instance is installed.')),
+      invoke: (guestId: string, method: string, input: any, operation: any) =>
+        rpc('guests.invoke', {
+          guestId,
+          method,
+          input,
+          operation: { id: operation?.id, deadlineAt: operation?.deadlineAt },
+        }),
     },
     log: Object.fromEntries(
       ['debug', 'info', 'warn', 'error'].map((level) => [
@@ -442,7 +522,7 @@ async function start() {
     ;(globalThis as any).__ceruContext = ctx
     const dispose = await entry(ctx)
     if (typeof dispose === 'function') disposers.push(dispose)
-    send('active')
+    send(initialized.kind === 'guest' ? 'bootstrap-ready' : 'active')
   } catch (error) {
     console.error(error)
     send('failed', { message: String(error) })
@@ -471,8 +551,17 @@ window.addEventListener('message', async (event) => {
         : item.resolve(message.data.value)
     }
   }
-  if (message.type === 'state') for (const handler of subscriptions) handler(message.data)
-  if (message.type === 'host-event') for (const handler of hostEvents.get(message.data.event) ?? []) handler(message.data.value)
+  if (message.type === 'dispose') {
+    await dispose()
+    return
+  }
+  if (disposed) return
+  if (message.type === 'state') {
+    latestState = message.data
+    for (const handler of subscriptions) handler(message.data)
+  }
+  if (message.type === 'host-event')
+    for (const handler of hostEvents.get(message.data.event) ?? []) handler(message.data.value)
   if (message.type === 'socket-event') {
     const { id, event, data } = message.data
     for (const handler of socketHandlers.get(id)?.get(event) ?? []) {
@@ -500,21 +589,52 @@ window.addEventListener('message', async (event) => {
     }
     try {
       const fn =
-        kind === 'action'
-          ? actions.get(target)
-          : kind === 'playlist-importer'
-            ? playlistImporters.get(target)?.[method]
-            : kind === 'lyric-converter' ? lyricConverters.get(target)?.[method] : providerMethod(providers.get(target), method)
+        kind === 'guest'
+          ? (input: any, operation: any) => guestHandler?.(method, input, operation)
+          : kind === 'action'
+            ? actions.get(target)
+            : kind === 'playlist-importer'
+              ? playlistImporters.get(target)?.[method]
+              : kind === 'lyric-converter'
+                ? lyricConverters.get(target)?.[method]
+                : providerMethod(providers.get(target), method)
       if (typeof fn !== 'function') throw new Error('Method is not registered')
       const value = await fn(...args, operation)
       send('invoke-result', { id, value })
     } catch (error) {
-      send('invoke-result', { id, error: `[${kind}:${target}${method ? '.' + method : ''}] ` + (error instanceof Error ? error.message : String(error)) })
+      send('invoke-result', {
+        id,
+        error:
+          `[${kind}:${target}${method ? '.' + method : ''}] ` +
+          (error instanceof Error ? error.message : String(error)),
+      })
     } finally {
       clearTimeout(timeout)
       operations.delete(id)
     }
   }
+})
+async function dispose() {
+  if (disposed) return
+  disposed = true
+  for (const operation of operations.values()) operation.abort()
+  for (const item of pending.values()) {
+    clearTimeout(item.timer)
+    item.reject(new Error('Surface disposed'))
+  }
+  pending.clear()
+  subscriptions.clear()
+  for (const cleanup of disposers.splice(0).reverse()) {
+    try {
+      await cleanup()
+    } catch (error) {
+      console.error(error)
+    }
+  }
+  send('disposed')
+}
+window.addEventListener('pagehide', () => {
+  void dispose()
 })
 window.addEventListener('error', (event) => send('failed', { message: event.message }))
 window.addEventListener('unhandledrejection', (event) => console.error(event.reason))

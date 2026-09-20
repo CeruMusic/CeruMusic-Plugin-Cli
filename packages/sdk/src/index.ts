@@ -1,4 +1,4 @@
-/// <reference path="./host-modules.d.ts" />
+/// <reference path="./host-modules.d.cts" />
 /** This package defines the v2 wire/authoring contract. It does not grant Host permissions. */
 import type { LoDashStatic } from 'lodash'
 import type { HostIconName, HostAssetName, LODASH_METHODS } from './catalog.js'
@@ -7,10 +7,17 @@ export * from './http.js'
 export * from './library.js'
 export * from './sockets.js'
 import type { SocketAPI } from './sockets.js'
+import type { GuestAPI, GuestBootstrapAPI } from './guests.js'
+import type { PluginStorageAPI } from './storage.js'
 import type { createHttpClient, HttpClientOptions } from './http.js'
 export * from './music.js'
 export * from './lyrics.js'
 export * from './quality.js'
+export * from './guests.js'
+export * from './share.js'
+export * from './storage.js'
+export * from './accounts.js'
+export * from './navigation.js'
 export * from './permissions.js'
 export * from './services.js'
 export * from './modules.js'
@@ -34,6 +41,11 @@ export interface ResourceRef {
   connectionId?: string
   kind: string
   id: string
+  /** Public canonical track ID within providerId. Allows the Host's selected resolver.
+   * Omit for plugin/account-private IDs. Cannot be combined with connectionId.
+   * Cross-plugin calls receive only this public identity, never data.
+   */
+  scope?: 'provider'
   /** Opaque plugin-owned JSON persisted by the Host and returned only to this plugin. */
   data?: JsonObject
 }
@@ -114,7 +126,13 @@ export interface MusicFault {
   }
 }
 export type ResolveResult =
-  | { ok: true; url: string; expiresAt?: number }
+  | {
+      ok: true
+      url: string
+      expiresAt?: number
+      /** Headers the Host must attach while fetching this exact media URL. */
+      requestHeaders?: Record<string, string>
+    }
   | { ok: false; error: MusicFault }
 export interface TrackProvider {
   search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
@@ -272,7 +290,17 @@ export interface PluginContext extends HostServices {
     }): Promise<void>
     /** Opens the application's existing import dialog. This does not create a plugin Surface. */
     playlistImport: {
-      open(request: { importerId: string; initialValue?: string }): Promise<void>
+      /** Only this plugin's importers are offered. Omit importerId to let the user choose. */
+      open(request: { importerId?: string; initialValue?: string; title?: string }): Promise<void>
+    }
+    /** Requests an update through the Host UI. A queued result does not mean it was installed. */
+    pluginUpdate: {
+      request(request: { version: string; url: string; notes?: string }): Promise<{
+        accepted: boolean
+        updated: boolean
+        version?: string
+        queued?: boolean
+      }>
     }
     setState(surfaceId: string, state: JsonObject): Promise<void>
     notify(message: {
@@ -281,14 +309,11 @@ export interface PluginContext extends HostServices {
       message: string
     }): Promise<void>
     openView(surfaceId: string): Promise<void>
+    closeView(surfaceId: string): Promise<void>
   }
-  storage: {
-    get<T extends JsonValue = JsonValue>(key: string): Promise<T | undefined>
-    set(key: string, value: JsonValue): Promise<void>
-    delete(key: string): Promise<void>
-  }
-  guests: {
-    list(): Promise<{ id: string; name: string; state: string }[]>
+  storage: PluginStorageAPI
+  guests: GuestAPI & {
+    /** Legacy install-draft contract; availability depends on the Host. Prefer import on desktop. */
     prepareInstall(request: {
       adapterId: string
       artifactHandle: string
@@ -298,12 +323,6 @@ export interface PluginContext extends HostServices {
       draftId: string,
       operation: OperationContext,
     ): Promise<{ guestId: string } | null>
-    invoke(
-      guestId: string,
-      method: string,
-      input: JsonValue,
-      operation: OperationContext,
-    ): Promise<JsonValue>
   }
   log: {
     debug(message: string, data?: JsonValue): void
@@ -329,9 +348,11 @@ export interface SurfaceContext extends Pick<PluginContext, 'host' | 'utils' | '
     mode?: 'append' | 'prepend' | 'wrap' | 'replace'
   }
   invoke(action: string, input: JsonValue): Promise<JsonValue>
+  /** Close this mounted Surface after its current action has returned. */
+  close(): Promise<void>
   subscribe(handler: (state: JsonObject) => void): Disposable
 }
-export interface GuestContext extends Pick<PluginContext, 'host' | 'utils'> {
+export interface GuestContext extends Pick<PluginContext, 'host' | 'utils'>, GuestBootstrapAPI {
   readonly guestId: string
   expose(name: string, value: unknown): void
   invokeHost(method: string, input: JsonValue): Promise<JsonValue>
@@ -345,6 +366,8 @@ export function definePlugin(entry: LogicEntry): LogicEntry {
 export function defineSurface(entry: SurfaceEntry): SurfaceEntry {
   return entry
 }
+export { defineNativeView, assertNativeView } from './native-view.js'
+export type { NativeView, NativeViewSection, NativeViewAction } from './native-view.js'
 export function defineGuestAdapter(entry: GuestEntry): GuestEntry {
   return entry
 }

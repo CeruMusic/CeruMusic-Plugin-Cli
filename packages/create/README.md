@@ -1,5 +1,9 @@
 # create-ceru-plugin
 
+0.3.5 的 `connected-library` 以 `playlistSections` 集成现有歌单页，并演示按 `sectionId` 导航定位。
+
+0.3.3 的 `connected-library` 模板包含原生歌单网格、歌曲列表、账号摘要与 Host 播放／导入动作示例。
+
 类似 create-vue 的 Ceru Music 插件脚手架。
 
 ```bash

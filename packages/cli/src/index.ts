@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util'
+import { readFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve, extname } from 'node:path'
 import { createInterface } from 'node:readline/promises'
@@ -14,7 +15,11 @@ import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project
 import { runDev } from './dev.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
-const VERSION = '0.2.5'
+const VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
 const HELP =
   'Ceru Plugin CLI ' +
   VERSION +
