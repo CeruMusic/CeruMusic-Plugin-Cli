@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": "https://github.com/CeruMusic/CeruMusic-Plugin-Template",
-  "digest": "sha256:833317c6d1191e01671d8368fafeca9d1a6f5755fdf591e253cac9ea8ef998c1",
+  "digest": "sha256:6ab25f0b47a8d0ff00c4ce5d7bda8fd01c1405b30fe6db12a166556774771935",
   "files": [
     "connected-library/js/_gitignore",
     "connected-library/js/.prettierrc.json",

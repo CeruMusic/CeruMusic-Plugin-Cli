@@ -51,7 +51,12 @@ test('select renders hints and moves with arrow keys and number shortcuts', asyn
   terminal.input.write('\r')
   await tick()
   assert.equal(await pending, 'vue')
-  assert.deepEqual(terminal.rawModes, [true, false], 'raw mode is entered and restored')
+  await tick()
+  assert.deepEqual(
+    terminal.rawModes,
+    [true, false],
+    'raw mode is entered once and restored after the prompt',
+  )
   assert.ok(terminal.text().includes('✔ 选择模板  vue'), terminal.text())
 })
 
@@ -64,6 +69,7 @@ test('select cancels on Ctrl+C and restores the terminal', async () => {
   await tick()
   terminal.input.write('\u0003')
   await assert.rejects(pending, (error) => error instanceof PromptCancelled)
+  await tick()
   assert.equal(terminal.rawModes.at(-1), false)
   assert.ok(terminal.text().includes('已取消'), terminal.text())
 })
@@ -109,6 +115,9 @@ test('init wizard collects directory, template and language from one session', a
     template: 'connected-library',
     language: 'js',
   })
+  // 连续提问共用一次原始模式会话：来回切换会让 Windows 上下一次输入落进行模式缓冲。
+  await tick()
+  assert.deepEqual(terminal.rawModes, [true, false], 'raw mode is toggled once per session')
   const rendered = terminal.text()
   assert.ok(rendered.includes('v0.0.0-test'), rendered)
   assert.ok(rendered.includes('连接表单与状态更新 demo'), rendered)

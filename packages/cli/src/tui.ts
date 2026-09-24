@@ -7,7 +7,6 @@ export interface TuiInput {
   isTTY?: boolean
   setRawMode?(mode: boolean): void
   resume?(): void
-  pause?(): void
   on(event: string, listener: (...args: any[]) => void): unknown
   off(event: string, listener: (...args: any[]) => void): unknown
 }
@@ -109,13 +108,50 @@ export function createStyle(output: TuiOutput): Style {
   }
 }
 
+// 原始模式按“会话”切换：一次向导里只进出一次，prompt 之间保持不变。
+// Windows 上 libuv 每次切换控制台模式都会重启读取；会话中反复 toggle 或 pause
+// 会让下一次输入落进行模式缓冲（方向键被行编辑吃掉，只剩回车有效）。
+let rawSession: TuiInput | undefined
+let rawRestore: NodeJS.Immediate | undefined
+
+function leaveRawMode(): void {
+  const input = rawSession
+  if (!input) return
+  rawSession = undefined
+  process.off('exit', leaveRawMode)
+  if (input.isTTY === true && typeof input.setRawMode === 'function') input.setRawMode(false)
+}
+
+// 提问之间的间隙不立刻退出原始模式：连续 prompt 沿用同一次 raw 会话。
+function leaveRawModeSoon(): void {
+  if (!rawSession || rawRestore) return
+  rawRestore = setImmediate(() => {
+    rawRestore = undefined
+    leaveRawMode()
+  })
+}
+
+function enterRawMode(input: TuiInput): void {
+  if (rawRestore) {
+    clearImmediate(rawRestore)
+    rawRestore = undefined
+    // 同一次会话：原始模式还没退出，直接接着用。
+    if (rawSession === input) return
+  } else if (rawSession === input) {
+    return
+  }
+  leaveRawMode()
+  rawSession = input
+  if (input.isTTY === true && typeof input.setRawMode === 'function') input.setRawMode(true)
+  input.resume?.()
+  process.once('exit', leaveRawMode)
+}
+
 // 接管按键：进入原始模式并监听 keypress；返回的清理函数恢复终端状态。
 function listen(streams: TuiStreams, onKey: (text: string, key: Key) => void): () => void {
   const { input } = streams
-  const raw = input.isTTY === true && typeof input.setRawMode === 'function'
   emitKeypressEvents(input as unknown as NodeJS.ReadableStream)
-  if (raw) input.setRawMode?.(true)
-  input.resume?.()
+  enterRawMode(input)
   const handler = (text: string, key: Key) => onKey(typeof text === 'string' ? text : '', key ?? {})
   input.on('keypress', handler)
   let closed = false
@@ -123,11 +159,8 @@ function listen(streams: TuiStreams, onKey: (text: string, key: Key) => void): (
     if (closed) return
     closed = true
     input.off('keypress', handler)
-    if (raw) input.setRawMode?.(false)
-    input.pause?.()
-    process.off('exit', close)
+    leaveRawModeSoon()
   }
-  process.once('exit', close)
   return close
 }
 
