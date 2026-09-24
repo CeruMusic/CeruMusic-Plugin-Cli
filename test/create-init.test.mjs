@@ -18,6 +18,8 @@ function fakeTerminal() {
   input.isTTY = true
   const rawModes = []
   input.setRawMode = (mode) => rawModes.push(mode)
+  const pauses = []
+  input.pause = () => pauses.push(true)
   const chunks = []
   const output = {
     isTTY: false,
@@ -26,7 +28,7 @@ function fakeTerminal() {
       return true
     },
   }
-  return { input, output, rawModes, text: () => chunks.join('') }
+  return { input, output, rawModes, pauses, text: () => chunks.join('') }
 }
 
 const tick = () => new Promise((done) => setImmediate(done))
@@ -118,6 +120,8 @@ test('init wizard collects directory, template and language from one session', a
   // 连续提问共用一次原始模式会话：来回切换会让 Windows 上下一次输入落进行模式缓冲。
   await tick()
   assert.deepEqual(terminal.rawModes, [true, false], 'raw mode is toggled once per session')
+  // 会话结束要停掉挂起的读取，否则 stdin 读取句柄会让进程无法退出。
+  assert.equal(terminal.pauses.length, 1, 'stdin read is stopped once when the session ends')
   const rendered = terminal.text()
   assert.ok(rendered.includes('v0.0.0-test'), rendered)
   assert.ok(rendered.includes('连接表单与状态更新 demo'), rendered)

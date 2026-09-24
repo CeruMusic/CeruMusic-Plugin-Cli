@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-core",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Ceru Music v2 plugin Core runtime and Host adapter boundary",
   "type": "module",
   "main": "./dist/index.js",
@@ -57,8 +57,8 @@
     "socket.io-client": "^4.8.3",
     "ws": "^8.21.3",
     "axios": "^1.13.2",
-    "@shiqianjiang/ceru-plugin-issuer": "0.3.9",
-    "@shiqianjiang/ceru-plugin-sdk": "0.3.9"
+    "@shiqianjiang/ceru-plugin-issuer": "0.3.10",
+    "@shiqianjiang/ceru-plugin-sdk": "0.3.10"
   },
   "publishConfig": {
     "access": "public",

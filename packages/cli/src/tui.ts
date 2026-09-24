@@ -7,6 +7,7 @@ export interface TuiInput {
   isTTY?: boolean
   setRawMode?(mode: boolean): void
   resume?(): void
+  pause?(): void
   on(event: string, listener: (...args: any[]) => void): unknown
   off(event: string, listener: (...args: any[]) => void): unknown
 }
@@ -114,12 +115,22 @@ export function createStyle(output: TuiOutput): Style {
 let rawSession: TuiInput | undefined
 let rawRestore: NodeJS.Immediate | undefined
 
+// 进程异常退出时的兜底：只恢复控制台模式，不再碰流。
+function restoreRawOnExit(): void {
+  const input = rawSession
+  if (!input) return
+  rawSession = undefined
+  if (input.isTTY === true && typeof input.setRawMode === 'function') input.setRawMode(false)
+}
+
 function leaveRawMode(): void {
   const input = rawSession
   if (!input) return
   rawSession = undefined
-  process.off('exit', leaveRawMode)
+  process.off('exit', restoreRawOnExit)
   if (input.isTTY === true && typeof input.setRawMode === 'function') input.setRawMode(false)
+  // 停掉挂起的读取：否则 stdin 的读取句柄会让事件循环一直存活，进程无法正常退出。
+  input.pause?.()
 }
 
 // 提问之间的间隙不立刻退出原始模式：连续 prompt 沿用同一次 raw 会话。
@@ -144,7 +155,7 @@ function enterRawMode(input: TuiInput): void {
   rawSession = input
   if (input.isTTY === true && typeof input.setRawMode === 'function') input.setRawMode(true)
   input.resume?.()
-  process.once('exit', leaveRawMode)
+  process.once('exit', restoreRawOnExit)
 }
 
 // 接管按键：进入原始模式并监听 keypress；返回的清理函数恢复终端状态。
