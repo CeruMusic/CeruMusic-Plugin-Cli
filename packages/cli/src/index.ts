@@ -109,7 +109,8 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
         language = answers.language
       } catch (error) {
         if (error instanceof PromptCancelled) {
-          process.exitCode = 130
+          // 用户主动取消（Ctrl+C / Esc）：正常退出即可，别让 npm 当成失败报一堆 error。
+          process.exitCode = 0
           return
         }
         throw error
