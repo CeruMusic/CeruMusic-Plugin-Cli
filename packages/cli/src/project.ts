@@ -559,6 +559,18 @@ export const TEMPLATES = [
   'web-dist',
 ] as const
 export type TemplateName = (typeof TEMPLATES)[number]
+// 与根 README 的模板表保持一致；Record 保证新增模板必须补说明。
+export const TEMPLATE_INFO: Record<TemplateName, string> = {
+  source: '本地搜索 demo、标准 Provider、结构化解析结果',
+  'connected-library': '连接表单与状态更新 demo',
+  importer: '曲目去重与导入计划预览',
+  'guest-adapter': '父插件与 Guest bootstrap 的边界',
+  'web-surface': '普通 DOM 页面',
+  vue: 'Vue 单文件组件、scoped CSS',
+  'vue-tsx': 'Vue TSX 组件',
+  react: 'React TSX/JSX、Hooks',
+  'web-dist': '封装已构建的本地 index.html、脚本和样式',
+}
 export async function scaffoldProject(
   destination: string,
   options: { template?: string; language?: string } = {},

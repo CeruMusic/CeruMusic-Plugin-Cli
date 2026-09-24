@@ -2,7 +2,6 @@ import { parseArgs } from 'node:util'
 import { readFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve, extname } from 'node:path'
-import { createInterface } from 'node:readline/promises'
 import {
   createTemplate,
   generateSigningKeys,
@@ -13,6 +12,8 @@ import {
 } from '@shiqianjiang/ceru-plugin-issuer'
 import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project.js'
 import { runDev } from './dev.js'
+import { printInitSummary, promptInit } from './init.js'
+import { PromptCancelled } from './tui.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
 const VERSION = (
@@ -93,39 +94,30 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === 'init') {
     let destination = positionals[1]
-    if (!destination && process.stdin.isTTY) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout })
+    let template = flags.template
+    let language = flags.lang
+    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+    if (interactive && (!destination || !template || !language)) {
       try {
-        destination = (await rl.question('项目目录 [my-ceru-plugin]: ')).trim() || 'my-ceru-plugin'
-      } finally {
-        rl.close()
+        const answers = await promptInit(
+          { input: process.stdin, output: process.stdout },
+          { destination, template, language },
+          VERSION,
+        )
+        destination = answers.destination
+        template = answers.template
+        language = answers.language
+      } catch (error) {
+        if (error instanceof PromptCancelled) {
+          process.exitCode = 130
+          return
+        }
+        throw error
       }
     }
     if (!destination) throw new Error('Specify a project directory')
-    let template = flags.template
-    let language = flags.lang
-    if (process.stdin.isTTY && (!template || !language)) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout })
-      try {
-        if (!template) {
-          console.log(TEMPLATES.map((name, i) => String(i + 1) + '. ' + name).join('\n'))
-          const answer = (await rl.question('选择模板 [1]: ')).trim() || '1'
-          template = /^\d+$/.test(answer) ? TEMPLATES[Number(answer) - 1] : answer
-          if (!template) throw new Error('Invalid template selection')
-        }
-        if (!language) language = (await rl.question('语言 ts / js [ts]: ')).trim() || 'ts'
-      } finally {
-        rl.close()
-      }
-    }
     const path = await scaffoldProject(destination, { template, language })
-    console.log(
-      'Created ' +
-        path +
-        '\n\nNext:\n  cd ' +
-        JSON.stringify(path) +
-        '\n  npm install\n  npm run build\n\nShare only dist/plugin.js. A v2-compatible Host is required.',
-    )
+    printInitSummary(process.stdout, path, interactive)
     return
   }
   if (command === 'build') {

@@ -1,5 +1,7 @@
 # create-ceru-plugin
 
+0.3.8 的脚手架支持方向键选择模板（每项带一行说明）与语言，目录非空会当场提示重填，创建后给出 `cd`／`npm` 步骤卡片；非交互终端仍输出纯文本。
+
 0.3.5 的 `connected-library` 以 `playlistSections` 集成现有歌单页，并演示按 `sectionId` 导航定位。
 
 0.3.3 的 `connected-library` 模板包含原生歌单网格、歌曲列表、账号摘要与 Host 播放／导入动作示例。

@@ -6,6 +6,8 @@
 
 0.3.5 新增 `playlistSections` 和 `sectionId` 导航，将插件个人歌单直接放入 Host 现有本地／云歌单页。`connected-library` 模板和独立工作台包含对应示例。
 
+0.3.8 的交互脚手架改用方向键选择模板与语言，选项自带一行说明，目录非空会就地提示重填，创建后打印后续步骤卡片。非交互终端仍输出原来的纯文本结果，脚本调用不变。
+
 也可以从源码运行：npm ci、npm run build，再使用 node packages/create/dist/bin.js 创建工程。
 
 ## 快速开始

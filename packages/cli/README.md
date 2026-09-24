@@ -1,5 +1,7 @@
 # Ceru Plugin CLI
 
+0.3.8 的 `init` 与 `npm create ceru-plugin` 改用方向键选择模板与语言，选项自带模板说明，目录非空就地提示重填，Ctrl+C 可取消，创建后打印 `cd`／`npm` 步骤卡片。非交互终端保持原来的纯文本输出。
+
 0.3.5 的 `playlistSections` 把原生音乐库内容放入 Host 现有本地／云歌单页。开发工作台提供相同的区块预览与 `sectionId` 导航；CLI 的 `--version` 读取当前包版本。
 
 0.3.3 支持原生 Surface、账号退出菜单、登录弹框关闭及浏览器公共播放服务。
