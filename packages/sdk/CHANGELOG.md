@@ -1,5 +1,12 @@
 # SDK 变更记录
 
+## 0.3.7
+
+- 公共 `scope: 'provider'` 歌曲不再要求 `pluginId`；Host 在调用用户选定的实现时才补入目标插件 ID。私有资源仍必须声明所有者。
+- `CrLyric` 新增 TTML 同构的 `translations` / `romanizations` 子行及逐字时间轴，保留单数纯文本字段以兼容旧 Host。
+- `LyricWord` 新增可选 `translation`，歌词断言现在严格校验主歌词和附属歌词的所有词级字段与时间顺序。
+- `LyricExportFormat` 新增 `ttml`，逐字翻译/音译可无损导出后再次解析。
+
 ## 0.3.6
 
 - `ResourceRef.scope: 'provider'` 标记公共平台歌曲 ID；支持 Host 按用户的播放/歌词路由选择实现。私有资源默认仍归原插件，`retargetTrackRef` 跨插件时只保留公共标识，剥离私有数据。

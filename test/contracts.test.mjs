@@ -17,30 +17,78 @@ import { networkPermissionKey } from '../packages/sdk/dist/http.js'
 import { compareQualities, selectQuality } from '../packages/sdk/dist/quality.js'
 
 test('public track routing transfers canonical identity only; private connections retain their owner', () => {
-  const ref = { pluginId: 'origin', providerId: 'wy', kind: 'track', id: '42',
-    scope: 'provider', data: { privateToken: 'not-for-another-plugin' } }
+  const ref = {
+    pluginId: 'origin',
+    providerId: 'wy',
+    kind: 'track',
+    id: '42',
+    scope: 'provider',
+    data: { privateToken: 'not-for-another-plugin' },
+  }
   assert.equal(retargetTrackRef(ref, 'origin'), ref)
   assert.deepEqual(retargetTrackRef(ref, 'preferred'), {
-    pluginId: 'preferred', providerId: 'wy', kind: 'track', id: '42', scope: 'provider',
+    pluginId: 'preferred',
+    providerId: 'wy',
+    kind: 'track',
+    id: '42',
+    scope: 'provider',
   })
   assert.throws(() => retargetTrackRef({ ...ref, scope: undefined }, 'preferred'), /Private/)
   assert.throws(() => assertResourceRef({ ...ref, connectionId: 'account' }), /connection/)
   assert.throws(() => assertResourceRef({ ...ref, kind: 'playlist' }), /public track/)
+  assert.doesNotThrow(() =>
+    assertResourceRef({ providerId: 'wy', kind: 'track', id: '42', scope: 'provider' }),
+  )
+  assert.throws(
+    () => assertResourceRef({ providerId: 'wy', kind: 'playlist', id: '42' }),
+    /owning plugin/,
+  )
 })
 
 test('quality sizes are actual positive byte counts keyed by advertised quality IDs', () => {
-  const item = { ref: { pluginId: 'origin', providerId: 'wy', kind: 'track', id: '42' },
-    title: 'Track', capabilities: [], metadata: { artists: [], qualities: ['128k', 'flac'],
-      qualitySizes: { '128k': 1234567, flac: 22000123 } } }
+  const item = {
+    ref: { pluginId: 'origin', providerId: 'wy', kind: 'track', id: '42' },
+    title: 'Track',
+    capabilities: [],
+    metadata: {
+      artists: [],
+      qualities: ['128k', 'flac'],
+      qualitySizes: { '128k': 1234567, flac: 22000123 },
+    },
+  }
   assert.doesNotThrow(() => assertContentPage({ items: [item] }))
   for (const invalid of [-1, 0, 1.5, Infinity, '12 MB', Number.MAX_SAFE_INTEGER + 1]) {
-    assert.throws(() => assertContentPage({ items: [{ ...item, metadata: {
-      ...item.metadata, qualitySizes: { flac: invalid },
-    } }] }), /quality sizes/)
+    assert.throws(
+      () =>
+        assertContentPage({
+          items: [
+            {
+              ...item,
+              metadata: {
+                ...item.metadata,
+                qualitySizes: { flac: invalid },
+              },
+            },
+          ],
+        }),
+      /quality sizes/,
+    )
   }
-  assert.throws(() => assertContentPage({ items: [{ ...item, metadata: {
-    ...item.metadata, qualitySizes: { unknown: 42 },
-  } }] }), /quality sizes/)
+  assert.throws(
+    () =>
+      assertContentPage({
+        items: [
+          {
+            ...item,
+            metadata: {
+              ...item.metadata,
+              qualitySizes: { unknown: 42 },
+            },
+          },
+        ],
+      }),
+    /quality sizes/,
+  )
 })
 
 test('quality ranking follows provider order even for custom or reordered names', () => {
@@ -74,7 +122,10 @@ test('native views are data-only and may reference only declared actions', () =>
   assert.throws(
     () =>
       assertNativeView(
-        { type: 'page', sections: [{ id: 'recent', layout: 'list', onPlay: 'missing', items: [] }] },
+        {
+          type: 'page',
+          sections: [{ id: 'recent', layout: 'list', onPlay: 'missing', items: [] }],
+        },
         actions,
       ),
     /Invalid native section/,
@@ -85,6 +136,12 @@ const workspace = fileURLToPath(new URL('../', import.meta.url))
 const sourceConfig = JSON.parse(
   await readFile(resolve(workspace, 'packages/cli/templates/source/ts/ceru.plugin.json'), 'utf8'),
 )
+
+test('structured plugin logs are serialized before transport truncation', async () => {
+  const runtime = await readFile(resolve(workspace, 'packages/cli/runtime/sandbox.ts'), 'utf8')
+  assert.match(runtime, /const encoded = JSON\.stringify\(clean\(data\)\)/)
+  assert.match(runtime, /console as any\)\[level\]\(formatPluginLog\(message, data\)\)/)
+})
 
 test('home sections are contribution-driven and reference declared providers', () => {
   const manifest = structuredClone(sourceConfig.manifest)
@@ -166,10 +223,54 @@ test('standard tracks and millisecond lyric documents pass Core validation', () 
           startTimeMs: 1000,
           endTimeMs: 2000,
           text: 'Hello',
-          words: [{ startTimeMs: 1000, endTimeMs: 2000, text: 'Hello' }],
+          translation: '你好',
+          translations: [
+            {
+              language: 'zh-Hans',
+              text: '你好',
+              words: [
+                { startTimeMs: 1000, endTimeMs: 1500, text: '你' },
+                { startTimeMs: 1500, endTimeMs: 2000, text: '好' },
+              ],
+            },
+          ],
+          words: [
+            {
+              startTimeMs: 1000,
+              endTimeMs: 2000,
+              text: 'Hello',
+              translation: '你好',
+              romanization: 'ni hao',
+            },
+          ],
         },
       ],
     }),
+  )
+  assert.throws(
+    () =>
+      assertLyricsDocument({
+        format: 'crlyric',
+        version: 1,
+        track: ref,
+        offsetMs: 0,
+        lines: [
+          {
+            startTimeMs: 1000,
+            text: 'Hello',
+            translations: [
+              {
+                text: '你好',
+                words: [
+                  { startTimeMs: 1100, endTimeMs: 1200, text: '你' },
+                  { startTimeMs: 1000, endTimeMs: 1100, text: '好' },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    /Invalid lyric word/,
   )
   assert.throws(
     () =>

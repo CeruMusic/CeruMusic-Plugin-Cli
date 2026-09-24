@@ -130,10 +130,10 @@ export class NodePluginSandbox {
         this.pending.delete(id)
         reject(new Error('Plugin operation cancelled'))
       }
-      const timer = setTimeout(() => {
-        cancel()
-        this.dispose()
-      }, 120000)
+      // A deadline belongs to this operation only. Disposing the worker here
+      // makes a slow importer look like a crashed plugin and causes the Host
+      // to persistently disable an otherwise healthy plugin.
+      const timer = setTimeout(cancel, 120000)
       const done = () => {
         clearTimeout(timer)
         signal?.removeEventListener('abort', cancel)

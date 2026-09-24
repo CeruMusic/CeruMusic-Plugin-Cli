@@ -240,12 +240,22 @@ test(
       '</script><script>' +
       `
       __ceruStart(async(ctx)=>{
+        let queueEventReceived = false;
+        ctx.events.on('queue.changed', value => { queueEventReceived = value?.revision === 'event-revision' });
         ctx.actions.register('play',async(_input,operation)=>{
           const call={permissionKey:'control',operation};
           await ctx.queue.replace([],call); await ctx.player.play(undefined,call); return 'played';
         });
         ctx.actions.register('cancel',async(_input,operation)=>{
           await ctx.player.pause({permissionKey:'control',operation});
+        });
+        ctx.actions.register('hotkey',async(_input,operation)=>{
+          const dispose = await ctx.hotkeys.register(
+            {id:'test',accelerator:'CommandOrControl+Shift+Y',commandId:'play'},
+            {permissionKey:'hotkey',operation},
+          );
+          await dispose();
+          return queueEventReceived ? 'disposed' : 'missing-event';
         });
       });` +
       '</script>'
@@ -326,25 +336,31 @@ test(
         if(event.source!==frame.contentWindow)return;
         const message=event.data; const data=message.data;
         try {
-          if(message.type==='ready')post('init',{generation,kind:'logic',catalog:{icons:{},assets:{}},resources:{},manifest:{id:'rpc',version:'1',contributes:{commands:['play','cancel'].map(action=>({id:action,action}))}}});
+          if(message.type==='ready')post('init',{generation,kind:'logic',catalog:{icons:{},assets:{}},resources:{},manifest:{id:'rpc',version:'1',contributes:{commands:['play','cancel','hotkey'].map(action=>({id:action,action}))}}});
           if(message.type==='active')post('invoke',{id:'play-op',kind:'action',target:'play',method:'',args:[{}]});
           if(message.type==='failed')throw Error(data.message);
           if(message.type==='rpc'){
             if(data.method.startsWith('services.')){
-              const operation=data.data.args.at(-1).operation;
-              check(operation && !('signal' in operation) && operation.userIntent.id===operation.id,'Operation was not serialized');
+              if(data.method!=='services.hotkeys.unregister'){
+                const operation=data.data.args.at(-1).operation;
+                check(operation && !('signal' in operation) && operation.userIntent.id===operation.id,'Operation was not serialized');
+              }
               services.push(data.method);
               if(data.method==='services.player.pause') {post('cancel',{id:'cancel-op'});return;}
             }
             if(data.method==='operations.cancel')cancelled=true;
-            post('rpc-result',{id:data.id,value:null});
+            post('rpc-result',{id:data.id,value:data.method==='services.hotkeys.register'?'hotkey-registration':null});
           }
           if(message.type==='invoke-result'){
             if(data.id==='play-op'){
               check(data.value==='played'&&!data.error,'Queue/play RPC failed: '+data.error);
               post('invoke',{id:'cancel-op',kind:'action',target:'cancel',method:'',args:[{}]});
+            } else if(data.id==='cancel-op') {
+              check(cancelled && data.error.includes('cancelled'),'Service call did not cancel');
+              post('host-event',{event:'queue.changed',value:{items:[],currentIndex:-1,revision:'event-revision'}});
+              post('invoke',{id:'hotkey-op',kind:'action',target:'hotkey',method:'',args:[{}]});
             } else {
-              check(cancelled && data.error.includes('cancelled'),'Service call did not cancel'); finish();
+              check(data.value==='disposed'&&!data.error,'Host event or hotkey disposer failed: '+data.error); finish();
             }
           }
         }catch(error){finish(error)}
@@ -352,7 +368,7 @@ test(
       window.addEventListener('message',listener);
       frame.srcdoc=${JSON.stringify(sandboxDocument)}; document.body.append(frame);
     });
-    check(same(services,['services.queue.replace','services.player.play','services.player.pause']),'Missing player RPC');
+    check(same(services,['services.queue.replace','services.player.play','services.player.pause','services.hotkeys.register','services.hotkeys.unregister']),'Missing service RPC');
     return {native:true,actions:received.length,opened,closed,services:true};
   }; test().catch(error => ({error: String(error), stack: error.stack}))`
     const script = join(temporary, 'run.cjs')

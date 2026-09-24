@@ -2,10 +2,18 @@ import type { ContentEntity, ResourceRef, ResolveResult } from './index.js'
 
 /** Milliseconds throughout. Platform-specific formats/decryption stay inside the plugin. */
 export interface LyricWord {
+  /** Optional translation aligned with this timed source word. */
+  translation?: string
   romanization?: string
   startTimeMs: number
   endTimeMs: number
   text: string
+}
+/** A translation or romanization, optionally preserving its own timed words. */
+export interface LyricSubLine {
+  language?: string
+  text: string
+  words?: LyricWord[]
 }
 export interface LyricLine {
   isBackground?: boolean
@@ -15,6 +23,9 @@ export interface LyricLine {
   text: string
   translation?: string
   romanization?: string
+  /** Structured TTML-style alternatives. Singular fields remain backward compatible. */
+  translations?: LyricSubLine[]
+  romanizations?: LyricSubLine[]
   words?: LyricWord[]
 }
 export interface CrLyric {
@@ -29,6 +40,10 @@ export interface CrLyric {
 /** @deprecated Use CrLyric. */
 export type LyricsDocument = CrLyric
 export interface TrackMetadata {
+  /** Optional platform hash; not a plugin owner or routing key. */
+  hash?: string
+  /** Original display sizes when exact bytes are unavailable. Never infer bytes from these labels. */
+  qualitySizeLabels?: Record<string, string>
   artists: string[]
   album?: { id?: string; title: string }
   qualities?: string[]
@@ -65,12 +80,43 @@ const record = (value: unknown): value is Record<string, any> =>
 const text = (value: unknown, max = 4096) => typeof value === 'string' && value.length <= max
 const milliseconds = (value: unknown) => Number.isFinite(value) && Number(value) >= 0
 
+function assertLyricWords(value: unknown, minimumStartTimeMs: number): void {
+  if (!Array.isArray(value) || value.length > 10000) throw new Error('Invalid lyric words')
+  let lastWord = minimumStartTimeMs
+  for (const word of value) {
+    if (
+      !record(word) ||
+      !milliseconds(word.startTimeMs) ||
+      !milliseconds(word.endTimeMs) ||
+      word.endTimeMs < word.startTimeMs ||
+      word.startTimeMs < lastWord ||
+      !text(word.text, 65536) ||
+      (word.translation !== undefined && !text(word.translation, 65536)) ||
+      (word.romanization !== undefined && !text(word.romanization, 65536))
+    )
+      throw new Error('Invalid lyric word')
+    lastWord = word.startTimeMs
+  }
+}
+
+function assertLyricSubLines(value: unknown): void {
+  if (!Array.isArray(value) || value.length > 16) throw new Error('Invalid lyric alternatives')
+  for (const item of value) {
+    if (
+      !record(item) ||
+      !text(item.text, 65536) ||
+      (item.language !== undefined && !text(item.language, 128))
+    )
+      throw new Error('Invalid lyric alternative')
+    if (item.words !== undefined) assertLyricWords(item.words, 0)
+  }
+}
+
 export function assertResourceRef(value: unknown): asserts value is ResourceRef {
   if (
     !record(value) ||
-    !['pluginId', 'providerId', 'kind', 'id'].every(
-      (key) => text(value[key], 2048) && value[key].length > 0,
-    )
+    !['providerId', 'kind', 'id'].every((key) => text(value[key], 2048) && value[key].length > 0) ||
+    (value.pluginId !== undefined && (!text(value.pluginId, 2048) || !value.pluginId))
   )
     throw new Error('Invalid resource reference')
   if (value.connectionId !== undefined && (!text(value.connectionId, 2048) || !value.connectionId))
@@ -80,6 +126,8 @@ export function assertResourceRef(value: unknown): asserts value is ResourceRef 
     (value.scope !== 'provider' || value.kind !== 'track' || value.connectionId !== undefined)
   )
     throw new Error('Provider scope requires a public track without a connection')
+  if (value.pluginId === undefined && value.scope !== 'provider')
+    throw new Error('Private resources require an owning plugin')
   if (value.data !== undefined) {
     if (!record(value.data)) throw new Error('Invalid resource private data')
     let encoded: string
@@ -126,15 +174,33 @@ export function assertContentPage(value: unknown): void {
         throw new Error('Track metadata must contain artists')
       if (item.metadata.durationMs !== undefined && !milliseconds(item.metadata.durationMs))
         throw new Error('Invalid track duration')
-      const { qualities, qualitySizes } = item.metadata
-      if (qualities !== undefined &&
-          (!Array.isArray(qualities) || qualities.length > 128 ||
-           !qualities.every((quality: unknown) => text(quality, 128) && !!quality)))
+      const { qualities, qualitySizes, qualitySizeLabels, hash } = item.metadata
+      if (hash !== undefined && !text(hash, 4096)) throw new Error('Invalid track hash')
+      if (
+        qualitySizeLabels !== undefined &&
+        (!record(qualitySizeLabels) ||
+          Object.keys(qualitySizeLabels).length > 128 ||
+          Object.entries(qualitySizeLabels).some(
+            ([quality, label]) => !qualities?.includes(quality) || !text(label, 128),
+          ))
+      )
+        throw new Error('Invalid track quality size labels')
+      if (
+        qualities !== undefined &&
+        (!Array.isArray(qualities) ||
+          qualities.length > 128 ||
+          !qualities.every((quality: unknown) => text(quality, 128) && !!quality))
+      )
         throw new Error('Invalid track qualities')
-      if (qualitySizes !== undefined &&
-          (!record(qualitySizes) || Object.keys(qualitySizes).length > 128 ||
-           Object.entries(qualitySizes).some(([quality, bytes]) =>
-             !qualities?.includes(quality) || !Number.isSafeInteger(bytes) || Number(bytes) <= 0)))
+      if (
+        qualitySizes !== undefined &&
+        (!record(qualitySizes) ||
+          Object.keys(qualitySizes).length > 128 ||
+          Object.entries(qualitySizes).some(
+            ([quality, bytes]) =>
+              !qualities?.includes(quality) || !Number.isSafeInteger(bytes) || Number(bytes) <= 0,
+          ))
+      )
         throw new Error('Invalid track quality sizes')
     }
     if (item.ref.kind === 'playlist' && item.playlist !== undefined) {
@@ -208,23 +274,9 @@ export function assertLyricsDocument(value: unknown): asserts value is LyricsDoc
     for (const field of ['translation', 'romanization'])
       if (line[field] !== undefined && !text(line[field], 65536))
         throw new Error('Invalid lyric translation')
-    if (line.words !== undefined) {
-      if (!Array.isArray(line.words) || line.words.length > 10000)
-        throw new Error('Invalid lyric words')
-      let lastWord = line.startTimeMs
-      for (const word of line.words) {
-        if (
-          !record(word) ||
-          !milliseconds(word.startTimeMs) ||
-          !milliseconds(word.endTimeMs) ||
-          word.endTimeMs < word.startTimeMs ||
-          word.startTimeMs < lastWord ||
-          !text(word.text, 65536)
-        )
-          throw new Error('Invalid lyric word')
-        lastWord = word.startTimeMs
-      }
-    }
+    if (line.translations !== undefined) assertLyricSubLines(line.translations)
+    if (line.romanizations !== undefined) assertLyricSubLines(line.romanizations)
+    if (line.words !== undefined) assertLyricWords(line.words, line.startTimeMs)
   }
   if (value.plainText !== undefined && !text(value.plainText, 1048576))
     throw new Error('Invalid plain lyrics')

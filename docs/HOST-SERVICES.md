@@ -43,6 +43,16 @@ CLI 不是运行时依赖。手写文件直接导出 `exports.manifest`、`expor
       "endTimeMs": 2400,
       "text": "你好",
       "translation": "Hello",
+      "translations": [
+        {
+          "language": "en",
+          "text": "Hello",
+          "words": [
+            { "startTimeMs": 1200, "endTimeMs": 1700, "text": "Hel" },
+            { "startTimeMs": 1700, "endTimeMs": 2400, "text": "lo" }
+          ]
+        }
+      ],
       "words": [
         { "startTimeMs": 1200, "endTimeMs": 1700, "text": "你" },
         { "startTimeMs": 1700, "endTimeMs": 2400, "text": "好" }
@@ -52,7 +62,7 @@ CLI 不是运行时依赖。手写文件直接导出 `exports.manifest`、`expor
 }
 ```
 
-所有时间使用毫秒；行和词按时间排序。翻译、罗马音、逐字时间可缺省；只有纯文本时用 `plainText`，无歌词返回空 `lines`。Core 拒绝格式错误，不替插件猜测单位或解密。开发 Host 已在 Provider/导入器结果进入 UI 前调用统一数据校验。
+所有时间使用毫秒；行和词按时间排序。逐字翻译/音译放在 `translations`/`romanizations` 的 `words` 中；单数 `translation`/`romanization` 是首选纯文本摘要，不得混入平台时间标签。翻译、罗马音、逐字时间可缺省；只有纯文本时用 `plainText`，无歌词返回空 `lines`。Core 拒绝格式错误，不替插件猜测单位或解密。开发 Host 已在 Provider/导入器结果进入 UI 前调用统一数据校验。
 
 歌单导入 API 接收标准歌曲列表与目标引用。`createHostLibraryBridge`（SDK 的 `host-library` 子路径）提供 Core 校验和委托流程：校验数据 → 确认授权/目标 → 调用已有本地或云歌单服务 → 成功后触发既有界面刷新事件。具体账号、存储、去重事务和刷新回调由软件绑定；它没有另一份歌单数据库。失败不会发出成功刷新。插件需要提示时调用 `ctx.ui.toast({ message: '导入完成', level: 'success' })`。
 

@@ -120,6 +120,20 @@ export interface HostServiceEvents {
   'permissions.changed': { keys: string[] }
 }
 
+export const HOST_SERVICE_EVENT_NAMES = [
+  'account.changed',
+  'library.changed',
+  'player.changed',
+  'queue.changed',
+  'lyrics.changed',
+  'downloads.changed',
+  'settings.changed',
+  'theme.changed',
+  'rooms.changed',
+  'devices.changed',
+  'permissions.changed',
+] as const satisfies readonly (keyof HostServiceEvents)[]
+
 /** Contract first: availability must be checked before using services not connected by this Host. */
 export interface HostServices {
   capabilities: {

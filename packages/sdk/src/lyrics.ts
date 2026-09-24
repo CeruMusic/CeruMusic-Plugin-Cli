@@ -10,7 +10,7 @@ export type LyricInputFormat =
   | 'krc'
   | 'ttml'
   | 'plain'
-export type LyricExportFormat = 'lrc' | 'enhanced-lrc' | 'yrc'
+export type LyricExportFormat = 'lrc' | 'enhanced-lrc' | 'yrc' | 'ttml'
 export interface LyricParseRequest {
   track: ResourceRef
   format: LyricInputFormat
@@ -26,7 +26,7 @@ export interface LyricExportResult {
   format: LyricExportFormat
   text: string
   mime: 'text/plain'
-  extension: 'lrc' | 'yrc'
+  extension: 'lrc' | 'yrc' | 'ttml'
 }
 /** Parsing/decryption/serialization belongs to plugins, not the player or download manager. */
 export interface LyricConverter {

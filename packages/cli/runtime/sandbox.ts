@@ -1,7 +1,7 @@
 import * as lodash from 'lodash-es'
 import { HOST_ICON_NAMES, HOST_ASSET_NAMES, LODASH_METHODS } from '../../sdk/src/catalog'
 import { createHttpClient } from '../../sdk/src/http'
-import { HOST_SERVICE_METHODS } from '../../sdk/src/services'
+import { HOST_SERVICE_EVENT_NAMES, HOST_SERVICE_METHODS } from '../../sdk/src/services'
 import * as cryptoTools from '../../sdk/src/compat/crypto.js'
 import * as compressionTools from '../../sdk/src/compat/zlib.js'
 import * as encodingTools from '../../sdk/src/compat/encoding.js'
@@ -92,6 +92,16 @@ for (const level of ['debug', 'log', 'info', 'warn', 'error'] as const) {
     send('log', { level, values: clean(data) })
   }
 }
+const formatPluginLog = (message: unknown, data?: unknown) => {
+  const text = String(message ?? '')
+  if (data === undefined) return text
+  // ctx.log always emits one console argument. This prevents the transport's
+  // argument array from becoming visible as `["message", {...}]` in the Host.
+  const encoded = JSON.stringify(clean(data))
+  if (encoded.length <= 2200) return `${text} | ${encoded}`
+  const edge = 1000
+  return `${text} | ${encoded.slice(0, edge)}…[truncated ${encoded.length - edge * 2} chars]…${encoded.slice(-edge)}`
+}
 function rpc(method: string, data: any = {}): Promise<any> {
   const id = 'rpc-' + ++sequence
   return new Promise((resolve, reject) => {
@@ -108,8 +118,8 @@ function rpc(method: string, data: any = {}): Promise<any> {
       error ? reject(error) : resolve(value)
     }
     pending.set(id, {
-      resolve: value => finish(null, value),
-      reject: error => finish(error),
+      resolve: (value) => finish(null, value),
+      reject: (error) => finish(error),
       timer: setTimeout(() => {
         finish(new Error('Host RPC timed out: ' + method))
       }, 120000),
@@ -122,8 +132,11 @@ function rpc(method: string, data: any = {}): Promise<any> {
       listeners.push({ signal, abort })
       signal.addEventListener('abort', abort, { once: true })
     }
-    try { send('rpc', { id, method, data: payload.data }) }
-    catch (error) { finish(error) }
+    try {
+      send('rpc', { id, method, data: payload.data })
+    } catch (error) {
+      finish(error)
+    }
   })
 }
 function shared() {
@@ -206,13 +219,15 @@ function context() {
   if (initialized.kind === 'web') {
     applySurfaceStyles()
     const root = document.getElementById('plugin-root')!
-    disposers.push(observeSurfaceSize(root, height => send('resize', { height })))
+    disposers.push(observeSurfaceSize(root, (height) => send('resize', { height })))
     return {
       ...base,
       root,
       mount: initialized.mount ?? { kind: 'page' },
       invoke: (action: string, input: any) => rpc('surface.invoke', { action, input }),
-      close: async () => { send('close-view') },
+      close: async () => {
+        send('close-view')
+      },
       subscribe: (handler: (state: any) => void) => {
         subscriptions.add(handler)
         if (latestState !== undefined) handler(latestState)
@@ -247,30 +262,32 @@ function context() {
       invokeHost: (method: string, data: any) => rpc('guest.' + method, data),
     }
   const declared = initialized.manifest
+  const services = Object.fromEntries(
+    Object.entries(HOST_SERVICE_METHODS).map(([service, methods]) => [
+      service,
+      Object.fromEntries(
+        methods.map((method) => [
+          method,
+          (...args: any[]) => rpc('services.' + service + '.' + method, { args }),
+        ]),
+      ),
+    ]),
+  ) as Record<string, Record<string, (...args: any[]) => Promise<any>>>
+  services.hotkeys.register = async (...args: any[]) => {
+    const registrationId = await rpc('services.hotkeys.register', { args })
+    let registered = true
+    return async () => {
+      if (!registered) return
+      registered = false
+      await rpc('services.hotkeys.unregister', { args: [registrationId] })
+    }
+  }
   return {
     ...base,
-    ...Object.fromEntries(
-      Object.entries(HOST_SERVICE_METHODS).map(([service, methods]) => [
-        service,
-        Object.fromEntries(
-          methods.map((method) => [
-            method,
-            (...args: any[]) => rpc('services.' + service + '.' + method, { args }),
-          ]),
-        ),
-      ]),
-    ),
+    ...services,
     events: {
       on: (name: string, listener: (value: any) => void) => {
-        if (
-          ![
-            'permissions.changed',
-            'library.changed',
-            'theme.changed',
-            'account.changed',
-            'player.changed',
-          ].includes(name)
-        )
+        if (!(HOST_SERVICE_EVENT_NAMES as readonly string[]).includes(name))
           throw new Error('Event is not connected by this Host')
         const listeners = hostEvents.get(name) ?? new Set<(value: any) => void>()
         listeners.add(listener)
@@ -420,10 +437,12 @@ function context() {
         prompt: (data: any) => rpc('ui.dialogs.prompt', data),
         pickPlaylist: (data: any) => rpc('ui.dialogs.pickPlaylist', data),
       },
-      navigation: { open: (data: any) => {
-        assertNavigationRequest(data, declared)
-        return rpc('ui.navigation.open', data)
-      } },
+      navigation: {
+        open: (data: any) => {
+          assertNavigationRequest(data, declared)
+          return rpc('ui.navigation.open', data)
+        },
+      },
       notifications: {
         show: (data: any, call: any) => rpc('ui.notifications.show', { ...data, call }),
       },
@@ -451,7 +470,9 @@ function context() {
         send('open-view', { surfaceId })
         return Promise.resolve()
       },
-      closeView: async (surfaceId: string) => { send('close-view', { surfaceId }) },
+      closeView: async (surfaceId: string) => {
+        send('close-view', { surfaceId })
+      },
     },
     storage: {
       get: (key: string) => rpc('storage.get', { key }),
@@ -482,7 +503,7 @@ function context() {
     log: Object.fromEntries(
       ['debug', 'info', 'warn', 'error'].map((level) => [
         level,
-        (message: string, data: any) => (console as any)[level](message, data),
+        (message: string, data?: any) => (console as any)[level](formatPluginLog(message, data)),
       ]),
     ),
     effects: { add: (dispose: () => unknown) => disposers.push(dispose) },

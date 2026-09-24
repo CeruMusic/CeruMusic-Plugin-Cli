@@ -20,6 +20,82 @@ import { buildProject } from './project.js'
 import { DevelopmentStorage } from './storage.js'
 
 const asset = (name: string) => fileURLToPath(new URL('../assets/' + name, import.meta.url))
+const developmentServiceMethods: Record<string, string[]> = {
+  account: ['getSession', 'getProfile'],
+  app: ['getInfo'],
+  player: ['getState'],
+  queue: ['get'],
+  history: ['list'],
+  downloads: ['list'],
+  localMusic: ['list'],
+  settings: ['get'],
+  rooms: ['getState'],
+  devices: ['list'],
+}
+const hostServiceNames = [
+  'account',
+  'app',
+  'library',
+  'player',
+  'queue',
+  'favorites',
+  'history',
+  'downloads',
+  'files',
+  'clipboard',
+  'localMusic',
+  'settings',
+  'window',
+  'hotkeys',
+  'sharing',
+  'rooms',
+  'devices',
+  'ai',
+  'tasks',
+] as const
+const developmentAvailability = (service: string) => {
+  const methods = developmentServiceMethods[service] ?? []
+  return {
+    service,
+    version: '1.0.0',
+    available: methods.length > 0,
+    ...(methods.length ? { methods } : { reason: 'host-not-connected' as const }),
+    permissionGroups: [],
+  }
+}
+const developmentServiceValue = (method: string, args: any[]) => {
+  if (method === 'services.account.getSession') return { loggedIn: false, profile: null }
+  if (method === 'services.account.getProfile') return null
+  if (method === 'services.app.getInfo')
+    return {
+      name: 'Ceru Plugin Development Host',
+      version: '0.3.6',
+      platform: process.platform,
+      locale: 'zh-CN',
+      theme: 'light',
+      hostApi: '2.0.0',
+    }
+  if (method === 'services.player.getState')
+    return {
+      status: 'idle',
+      track: null,
+      positionMs: 0,
+      durationMs: 0,
+      volume: 1,
+      muted: false,
+      repeat: 'off',
+      shuffle: false,
+    }
+  if (method === 'services.queue.get')
+    return { items: [], currentIndex: -1, revision: 'development-empty' }
+  if (method === 'services.history.list' || method === 'services.localMusic.list')
+    return { items: [], totalEstimate: 0 }
+  if (method === 'services.downloads.list' || method === 'services.devices.list') return []
+  if (method === 'services.settings.get')
+    return Object.fromEntries((Array.isArray(args[0]) ? args[0] : []).map((key) => [key, null]))
+  if (method === 'services.rooms.getState') return { joined: false }
+  return undefined
+}
 function mergeConfig(base: Record<string, any>, override: Record<string, any>) {
   const result = structuredClone(base)
   for (const [key, value] of Object.entries(override))
@@ -514,46 +590,24 @@ export async function runDev(
           }
           if (input.method === 'services.capabilities.list') {
             json(200, {
-              value: [
-                'account',
-                'library',
-                'player',
-                'queue',
-                'favorites',
-                'history',
-                'downloads',
-                'files',
-                'clipboard',
-                'localMusic',
-                'settings',
-                'window',
-                'hotkeys',
-                'sharing',
-                'rooms',
-                'devices',
-                'ai',
-                'tasks',
-              ].map((service) => ({
-                service,
-                version: '1.0.0',
-                available: false,
-                reason: 'host-not-connected',
-                permissionGroups: [],
-              })),
+              value: hostServiceNames.map(developmentAvailability),
             })
             return
           }
           if (input.method === 'services.capabilities.get') {
             const service = String(data.args?.[0] ?? '')
             json(200, {
-              value: {
-                service,
-                version: '1.0.0',
-                available: false,
-                reason: 'host-not-connected',
-                permissionGroups: [],
-              },
+              value: developmentAvailability(service),
             })
+            return
+          }
+          if (input.method.startsWith('services.')) {
+            const value = developmentServiceValue(input.method, data.args ?? [])
+            if (value === undefined)
+              throw new Error(
+                '此独立开发 Host 尚未连接该宿主服务；请先通过 capabilities.get() 检查 methods，并在正式桌面 Host 中验证。',
+              )
+            json(200, { value })
             return
           }
           if (input.method === 'http.request') {

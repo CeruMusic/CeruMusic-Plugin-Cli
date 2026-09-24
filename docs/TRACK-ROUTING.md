@@ -1,4 +1,4 @@
-# 公共歌曲路由与音质大小（0.3.6）
+# 公共歌曲路由与音质大小（0.3.7）
 
 歌曲来源与播放实现可以不同。例如账号插件读取个人歌单，用户选择另一个同平台音源解析播放。Host 只处理标准引用和路由，平台账号、歌曲权益与音质枚举转换仍由插件实现。
 
@@ -19,6 +19,8 @@ const song: MusicTrack = {
     artists: ['示例歌手'],
     qualities: ['128k', '320k', 'flac'],
     qualitySizes: { '128k': 3600123, '320k': 9000456, flac: 28000789 },
+    qualitySizeLabels: { '320k': '9.12 MB' }, // 平台原始展示大小，可独立于字节数存在
+    durationMs: 239000, // 03:59；单位为毫秒
   },
 }
 ```
@@ -26,6 +28,8 @@ const song: MusicTrack = {
 - `scope: 'provider'` 仅用于公共歌曲 ID；Host 的播放、下载、歌词按各自配置的实现路由。跨插件时重建目标 `pluginId`，只传 `providerId/kind/id/scope`，不传原插件的 `data`。
 - 不写 `scope` 时保持原插件归属；服务器私有库、账号相关 ID 使用这个默认行为，并通过 `connectionId` 区分连接。`scope: 'provider'` 不能与 `connectionId` 同时使用。个人歌单本身仍归原插件，只有其中公共歌曲可以声明 provider scope。
 - `metadata.qualities` 描述歌曲实际存在的格式；`qualitySizes` 是相同标识对应的真实正整数**字节数**，未知就省略，不能根据时长估算或填入 MB 字符串。`qualities`、manifest 的 `qualities` 和 `resolve(ref, quality)` 使用同一套标识。
+- `metadata.qualitySizeLabels` 保存平台返回的原始大小文字，键必须在 `qualities` 中。`metadata.hash` 可选，保存平台已有哈希，不作为插件归属。未知字段省略，不生成虚构大小或哈希。
+- 宿主本地队列、历史、歌单与云端交换使用 `MusicItem`。公共歌曲按 `source + String(songmid)` 保存，不持久化可推导的公共引用；私有歌曲保留所属插件和连接。`ContentEntity` 只在调用边界转换，不能用历史接口返回值往返覆盖原歌曲元数据。
 - 网易云示例：`standard → 128k`、`higher → 192k`、`exhigh → 320k`、`lossless → flac`、`hires → hires`、`jyeffect → atmos`、`sky → atmos_plus`、`jymaster → master`。平台私有枚举只在插件内部转换；不为不存在的格式伪造大小。
 - 内容读取账号的会员级别不应缩减所有其他解析器可见的歌曲格式；账号解析器在实际 `resolve` 时自行验证播放权限。Host 下载菜单同时参考歌曲格式和所选播放实现支持的格式。
 

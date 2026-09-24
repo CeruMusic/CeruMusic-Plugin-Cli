@@ -20,21 +20,45 @@ interface CrLyric {
     startTimeMs: number
     endTimeMs?: number
     text: string
-    translation?: string
-    romanization?: string
+    translation?: string // 第一组翻译的兼容纯文本摘要
+    romanization?: string // 第一组音译的兼容纯文本摘要
+    translations?: LyricSubLine[]
+    romanizations?: LyricSubLine[]
     isBackground?: boolean
     isDuet?: boolean
-    words?: { startTimeMs: number; endTimeMs: number; text: string; romanization?: string }[]
+    words?: {
+      startTimeMs: number
+      endTimeMs: number
+      text: string
+      translation?: string
+      romanization?: string
+    }[]
   }[]
   plainText?: string
 }
+
+interface LyricSubLine {
+  language?: string
+  text: string
+  words?: LyricWord[]
+}
 ```
 
-Provider `tracks.lyrics` 返回此结构。QRC/KRC 解密、YRC/LRC/增强 LRC/TTML 解析都在插件进行；TTML 工具及 XML 解析器作为插件依赖编入单文件，不放入宿主。
+Provider `tracks.lyrics` 返回此结构。逐字翻译/音译使用 `translations`/`romanizations` 保留独立时间轴，并同时填写首选内容的 `translation`/`romanization` 纯文本摘要以兼容旧 Host。时间标签不是文本，禁止写入摘要字段。QRC/KRC 解密、YRC/LRC/增强 LRC/TTML 解析都在插件进行；TTML 工具及 XML 解析器作为插件依赖编入单文件，不放入宿主。
 
 插件声明 `contributes.lyricConverters` 并通过 `ctx.lyricConverters.register(id, { parse, export })` 注册。parse 支持明确格式或 auto；export 接收 CrLyric 和目标 lrc、enhanced-lrc、yrc，返回 text、mime、extension。播放端仅映射标准毫秒字段到渲染组件；下载/标签写入不二次转换。无转换插件时本地音频继续播放，非 crlyric 的嵌入歌词不可渲染。
 
 聆澜的网易云/QQ 歌词优先请求 TTML，超时或解析失败回退平台接口，两者都输出 crlyric。
+
+## 插件日志
+
+`ctx.log.debug/info/warn/error` 接受 `message` 和可选的结构化详情：
+
+```ts
+ctx.log.info('歌词加载完成', { source: 'tx', lines: 50 })
+```
+
+运行时会保持消息和详情为同一条日志，Host 负责脱敏、格式化和长度限制。不要手动把详情 `JSON.stringify` 后拼进消息，也不需要传入 `undefined` 占位参数；长字符串/对象会保留首尾并标记截断，方便开发预览和正式客户端得到一致输出。
 
 ## 权限与更新
 

@@ -36,7 +36,12 @@ export * from './manifest.js'
 import type { JsonValue, JsonObject, MaybePromise, Disposable, PluginManifest } from './manifest.js'
 
 export interface ResourceRef {
-  pluginId: string
+  /**
+   * Owning plugin for private resources. Public provider-scoped tracks may omit
+   * this field so a playlist/search result does not pin playback to its source
+   * plugin; the Host fills it in only when invoking a selected implementation.
+   */
+  pluginId?: string
   providerId: string
   connectionId?: string
   kind: string
