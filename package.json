@@ -10,7 +10,8 @@
     "build": "tsc -b packages/sdk packages/issuer packages/core packages/cli packages/create && node scripts/build-runtime.mjs",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs",
     "test:sdk-package": "node --test test/sdk-package.test.mjs",
-    "pack:all": "node scripts/pack.mjs"
+    "pack:all": "node scripts/pack.mjs",
+    "release:check": "node scripts/check-release-version.mjs"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",

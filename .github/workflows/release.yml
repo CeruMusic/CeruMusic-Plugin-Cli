@@ -1,0 +1,58 @@
+name: Release tooling
+# 推送 v* tag 即发布：5 个包同版本发到 npm（Trusted Publishing / OIDC，无需 token），
+# 再用 artifacts/*.tgz 建 GitHub Release。配置与本机流程见 docs/release.md。
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  release:
+    # 只在主仓库发布，避免 fork 的 tag 触发
+    if: github.repository == 'CeruMusic/CeruMusic-Plugin-Cli'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create
+      id-token: write # npm Trusted Publishing 的 OIDC 令牌
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # 不设 registry-url：它会写一个带 NODE_AUTH_TOKEN 占位符的 .npmrc，
+      # 而可信发布靠 OIDC，registry 由各包 publishConfig 固定为 registry.npmjs.org。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Trusted Publishing 要求 npm >= 11.5.1 且 Node >= 22.14；发布构建不使用依赖缓存
+      - run: npm install -g npm@^11.5.1
+      - run: node scripts/check-release-version.mjs
+      - run: npm ci
+      - run: npm test
+      # pack:all 会重新校验产物里没有密钥/测试工程，产出的 tgz 同时作为 Release 附件
+      - run: npm run pack:all
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # 内部依赖是精确版本，必须按依赖顺序发布：sdk ← issuer ← core ← cli ← create
+          for directory in sdk issuer core cli create; do
+            name=$(node -p "require('./packages/${directory}/package.json').name")
+            # 重跑时跳过 registry 上已存在的版本，只补发剩余的包与 Release
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "::notice::${name}@${version} 已存在，跳过"
+              continue
+            fi
+            echo "::group::publish ${name}@${version}"
+            (cd "packages/${directory}" && npm publish)
+            echo "::endgroup::"
+          done
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" artifacts/*.tgz \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
