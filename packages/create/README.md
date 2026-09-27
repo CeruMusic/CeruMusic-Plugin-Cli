@@ -1,5 +1,7 @@
 # create-ceru-plugin
 
+0.3.12 插件网络请求支持宿主注入代理：`requestNetwork` 新增 `setNetworkProxyResolver`，宿主可让搜索、歌词等请求遵循应用自身的网络代理设置。
+
 0.3.11 用户 Ctrl+C/Esc 取消时正常退出（不再返回 130 让 `npm create` 报错）。
 
 0.3.10 修复交互向导结束后进程不退出：会话结束停掉挂起的 stdin 读取，CLI 正常返回。

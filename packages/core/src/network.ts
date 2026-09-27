@@ -28,6 +28,22 @@ export function isPrivateAddress(address: string): boolean {
   )
 }
 
+export interface NetworkProxyAgents {
+  httpAgent: any
+  httpsAgent: any
+}
+export type NetworkProxyResolver = (url: string) => NetworkProxyAgents | null
+
+let networkProxyResolver: NetworkProxyResolver | null = null
+
+/**
+ * 宿主注入的代理解析器:按目标 URL 返回代理 agents(null = 直连)。
+ * 注入后重定向链的每一跳都会重新询问;DNS pin 仅在直连时保留。
+ */
+export function setNetworkProxyResolver(resolver: NetworkProxyResolver | null): void {
+  networkProxyResolver = typeof resolver === 'function' ? resolver : null
+}
+
 export async function requestNetwork(
   input: any,
   privateAllowed: () => boolean,
@@ -47,8 +63,9 @@ export async function requestNetwork(
   const chosen = addresses[0]
   const pin = ((_hostname: string, options: any, callback: any) =>
     options?.all ? callback(null, [chosen]) : callback(null, chosen.address, chosen.family)) as any
-  const httpAgent = new HttpAgent({ lookup: pin })
-  const httpsAgent = new HttpsAgent({ lookup: pin })
+  const proxyAgents = networkProxyResolver?.(url.href) ?? null
+  const httpAgent = proxyAgents?.httpAgent ?? new HttpAgent({ lookup: pin })
+  const httpsAgent = proxyAgents?.httpsAgent ?? new HttpsAgent({ lookup: pin })
   const headers: Record<string, string> = {}
   for (const [name, value] of Object.entries(input.headers ?? {})) {
     if (/^(host|connection|content-length|transfer-encoding|proxy-.*|upgrade)$/i.test(name))
@@ -115,7 +132,9 @@ export async function requestNetwork(
       throw new Error('网络请求失败: ' + (error.code ?? 'NETWORK_ERROR'))
     throw error
   } finally {
-    httpAgent.destroy()
-    httpsAgent.destroy()
+    if (!proxyAgents) {
+      httpAgent.destroy()
+      httpsAgent.destroy()
+    }
   }
 }
