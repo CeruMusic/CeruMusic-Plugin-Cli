@@ -1,5 +1,13 @@
 # SDK 变更记录
 
+## 0.3.15
+
+- 同步 CLI 内嵌模板快照：脚手架生成的项目依赖指向 `^0.3.15`（0.3.14 发版时遗漏）。SDK 公共 API 无变化。
+
+## 0.3.14
+
+- 曲目新增可选的高清封面协议 `tracks.artworkHires`，插件可在保留低清 `artwork` 的同时声明更大尺寸封面。
+
 ## 0.3.13
 
 - `ctx.library.playlists` 新增 `removeTracks({ target, items, permissionKey, operation })`，返回 `{ removed, notFound }`，不会创建或移动歌单。

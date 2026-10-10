@@ -6,6 +6,10 @@
 
 0.3.5 新增 `playlistSections` 和 `sectionId` 导航，将插件个人歌单直接放入 Host 现有本地／云歌单页。`connected-library` 模板和独立工作台包含对应示例。
 
+0.3.15 同步内嵌模板快照：脚手架生成的项目把 SDK/CLI 依赖指向 `^0.3.15`（0.3.14 发版时漏掉这一步）。模板内容与 [CeruMusic-Plugin-Template](https://github.com/CeruMusic/CeruMusic-Plugin-Template) 保持一致。
+
+0.3.14 曲目新增可选的高清封面协议 `tracks.artworkHires`，插件可在保留低清 `artwork` 的同时声明更大尺寸封面。
+
 0.3.13 `ctx.library.playlists` 补齐删除能力：`removeTracks({ target, items, permissionKey, operation })` 返回 `{ removed, notFound }`，`clearPlaylist({ target, permissionKey, operation })` 清空歌单但保留歌单本体。两者都要求 `library.delete`，宿主侧通过 `createHostLibraryBridge` 的 `remove` / `clear` 接入现有歌单服务，并在持久化成功后发送 `library.changed`。
 
 0.3.12 插件网络请求支持宿主注入代理：`requestNetwork` 新增 `setNetworkProxyResolver`，宿主可让搜索、歌词等请求遵循应用自身的网络代理设置。
