@@ -1,5 +1,12 @@
 # SDK 变更记录
 
+## 0.3.13
+
+- `ctx.library.playlists` 新增 `removeTracks({ target, items, permissionKey, operation })`，返回 `{ removed, notFound }`，不会创建或移动歌单。
+- 新增 `clearPlaylist({ target, permissionKey, operation })`，清空歌单但保留歌单本体。
+- 两个删除接口均要求 `library.delete`；`createHostLibraryBridge` 新增 `remove` / `clear` 宿主回调，并在持久化成功后调用 `changed(target)`。
+- 新增 `assertRemovableTracks`（从包根导出与 `@shiqianjiang/ceru-plugin-sdk/validate` 子路径），在破坏性调用前校验纯曲目列表。
+
 ## 0.3.7
 
 - 公共 `scope: 'provider'` 歌曲不再要求 `pluginId`；Host 在调用用户选定的实现时才补入目标插件 ID。私有资源仍必须声明所有者。

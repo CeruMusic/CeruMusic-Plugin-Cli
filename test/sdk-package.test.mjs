@@ -67,8 +67,12 @@ import {
   type PluginContext, type OperationContext,
   type GuestInfo, type GuestProvider, type GuestAPI, type GuestBootstrapAPI,
   type ShareMusicInfo, type ShareResolverContext, type ShareResolver, type ShareResolverEntry,
-  type PluginStorageAPI, type PluginStorageReadKey, type PluginStorageWriteKey
+  type PluginStorageAPI, type PluginStorageReadKey, type PluginStorageWriteKey,
+  type PlaylistRemoveResult, type HostLibraryServices,
+  assertRemovableTracks
 } from '@shiqianjiang/ceru-plugin-sdk'
+import { createHostLibraryBridge } from '@shiqianjiang/ceru-plugin-sdk'
+import { assertRemovableTracks as subpathAssert } from '@shiqianjiang/ceru-plugin-sdk/validate'
 import type { GuestInfo as SubpathGuest, GuestBootstrapAPI as SubpathBootstrap } from '@shiqianjiang/ceru-plugin-sdk/guests'
 import type { ShareResolverEntry as SubpathShare } from '@shiqianjiang/ceru-plugin-sdk/share'
 import type { PluginStorageAPI as SubpathStorage } from '@shiqianjiang/ceru-plugin-sdk/storage'
@@ -105,14 +109,38 @@ definePlugin((ctx) => {
     await storage.set({ key: 'summary', readableBy: ['example.reader'] }, value)
     await storage.delete('old')
     await ctx.ui.playlistImport.open({ title: 'Import playlist' })
+    const target = { id: 'list-1', location: 'local' as const }
+    const removal: PlaylistRemoveResult = await ctx.library.playlists.removeTracks({
+      target,
+      items: [],
+      permissionKey: 'remove',
+      operation
+    })
+    await ctx.library.playlists.clearPlaylist({ target, permissionKey: 'remove', operation })
+    // @ts-expect-error library.delete is required; the removal request takes a target, not a picker.
+    await ctx.library.playlists.removeTracks({ items: [], permissionKey: 'remove', operation })
+    subpathAssert([])
+    assertRemovableTracks([])
     const result = await ctx.ui.pluginUpdate.request({ version: '1.1.0', url: 'https://example.com/plugin.js' })
     // @ts-expect-error Read access cannot set another plugin's reader policy.
     storage.get({ key: 'summary', readableBy: '*' })
     // @ts-expect-error Reader policies are a wildcard or plugin IDs, not numbers.
     storage.set({ key: 'summary', readableBy: 42 }, null)
-    return { queued: result.queued ?? false }
+    return { queued: result.queued ?? false, removed: removal.removed }
   })
 })
+
+export const hostBridge: HostLibraryServices = {
+  authorize: async () => {},
+  chooseTarget: async () => null,
+  list: async () => ({ items: [] }),
+  getTracks: async () => ({ items: [] }),
+  append: async () => ({ added: 0, skipped: 0 }),
+  remove: async (_target, items) => ({ removed: items.length, notFound: 0 }),
+  clear: async () => {},
+  changed: () => {}
+}
+export const bridge = createHostLibraryBridge(hostBridge)
 
 defineManifest({
   manifestVersion: 2, id: 'example.demo', name: 'Demo', version: '1.0.0',

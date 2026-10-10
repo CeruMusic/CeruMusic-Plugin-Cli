@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-sdk",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "description": "Typed authoring contracts for Ceru Music v2 single-file plugins",
   "type": "module",
   "main": "./dist/index.js",
@@ -57,6 +57,11 @@
       "types": "./dist/permissions.d.ts",
       "import": "./dist/permissions.js",
       "default": "./dist/permissions.js"
+    },
+    "./validate": {
+      "types": "./dist/validate.d.ts",
+      "import": "./dist/validate.js",
+      "default": "./dist/validate.js"
     },
     "./services": {
       "types": "./dist/services.d.ts",

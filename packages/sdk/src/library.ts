@@ -29,6 +29,19 @@ export interface PlaylistImportResult {
   added: number
   skipped: number
 }
+export interface PlaylistRemoveRequest {
+  target: PlaylistReference
+  /** Only `kind: 'track'` entities are accepted. */
+  items: ContentEntity[]
+  permissionKey: string
+  operation: OperationContext
+}
+export interface PlaylistRemoveResult {
+  /** Tracks that were actually in the playlist and are now gone. */
+  removed: number
+  /** Tracks that matched nothing, so the caller can tell a no-op from a failure. */
+  notFound: number
+}
 
 export interface PlaylistImporterImplementation {
   /** Resolve a pasted link/ID and return one page. Host owns paging and the import UI. */
@@ -59,5 +72,16 @@ export interface LibraryAPI {
     }): Promise<Page<ContentEntity>>
     /** Host handles destination selection, auth, deduplication, persistence and cloud sync. */
     import(request: PlaylistImportRequest): Promise<PlaylistImportResult>
+    /**
+     * Delete tracks from an existing playlist. Requires `library.delete`; never
+     * creates or relocates a playlist. `removed + notFound` equals `items.length`.
+     */
+    removeTracks(request: PlaylistRemoveRequest): Promise<PlaylistRemoveResult>
+    /** Empty a playlist while keeping the playlist itself. Requires `library.delete`. */
+    clearPlaylist(request: {
+      target: PlaylistReference
+      permissionKey: string
+      operation: OperationContext
+    }): Promise<void>
   }
 }

@@ -5,6 +5,7 @@ import type { HostIconName, HostAssetName, LODASH_METHODS } from './catalog.js'
 export * from './catalog.js'
 export * from './http.js'
 export * from './library.js'
+export * from './validate.js'
 export * from './sockets.js'
 import type { SocketAPI } from './sockets.js'
 import type { GuestAPI, GuestBootstrapAPI } from './guests.js'
@@ -373,6 +374,9 @@ export function defineSurface(entry: SurfaceEntry): SurfaceEntry {
 }
 export { defineNativeView, assertNativeView } from './native-view.js'
 export type { NativeView, NativeViewSection, NativeViewAction } from './native-view.js'
+/** Host-side playlist delegation; import in the Electron main/renderer host, not in a plugin. */
+export { createHostLibraryBridge } from './host-library.js'
+export type { HostLibraryServices } from './host-library.js'
 export function defineGuestAdapter(entry: GuestEntry): GuestEntry {
   return entry
 }

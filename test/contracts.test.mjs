@@ -8,10 +8,12 @@ import {
   assertContentPage,
   assertLyricsDocument,
   assertNativeView,
+  assertRemovableTracks,
   assertResolveResult,
   assertResourceRef,
   retargetTrackRef,
   permissionGroup,
+  createHostLibraryBridge,
 } from '../packages/sdk/dist/index.js'
 import { networkPermissionKey } from '../packages/sdk/dist/http.js'
 import { compareQualities, selectQuality } from '../packages/sdk/dist/quality.js'
@@ -97,6 +99,98 @@ test('quality ranking follows provider order even for custom or reordered names'
   assert.equal(compareQualities(order, 'missing', 'flac'), undefined)
   assert.equal(selectQuality(order), 'custom-best')
   assert.equal(selectQuality(order, ['master', 'small', 'custom-best'], 'flac'), 'small')
+})
+
+test('playlist removal rejects non-track payloads before reaching the Host', () => {
+  const track = { ref: { providerId: 'wy', kind: 'track', id: '42' } }
+  assert.doesNotThrow(() => assertRemovableTracks([track]))
+  for (const invalid of [
+    undefined,
+    null,
+    [],
+    'track',
+    [{ ref: { providerId: 'wy', kind: 'playlist', id: '42' } }],
+    [{ ref: { providerId: 'wy', kind: 'track', id: '' } }],
+    [{ ref: { providerId: 'wy', kind: 'track', id: 42 } }],
+    [null],
+  ])
+    assert.throws(() => assertRemovableTracks(invalid), /playlist removal|Only tracks/)
+})
+
+test('playlist removal deletes only declared tracks and reports unmatched entries', async () => {
+  const track = (id) => ({ ref: { providerId: 'wy', kind: 'track', id } })
+  const calls = []
+  const services = {
+    async authorize(key, capability, operation, target) {
+      calls.push(['authorize', key, capability, target?.id])
+      if (capability !== 'library.delete') throw new Error('删除需要 library.delete')
+    },
+    async remove(target, items) {
+      calls.push(['remove', target.id, items.map((item) => item.ref.id)])
+      return { removed: items.length - 1, notFound: 1 }
+    },
+    async clear(target) {
+      calls.push(['clear', target.id])
+    },
+    changed(target) {
+      calls.push(['changed', target.id])
+    },
+  }
+  const bridge = createHostLibraryBridge(services)
+  const operation = { id: 'op', deadlineAt: 0, signal: new AbortController().signal }
+  const target = { id: 'list-1', location: 'local' }
+
+  assert.deepEqual(
+    await bridge.playlists.removeTracks({
+      target,
+      items: [track('1'), track('2')],
+      permissionKey: 'remove',
+      operation,
+    }),
+    { removed: 1, notFound: 1 },
+  )
+  assert.deepEqual(calls, [
+    ['authorize', 'remove', 'library.delete', 'list-1'],
+    ['remove', 'list-1', ['1', '2']],
+    ['changed', 'list-1'],
+  ])
+
+  calls.length = 0
+  await bridge.playlists.clearPlaylist({ target, permissionKey: 'remove', operation })
+  assert.deepEqual(calls, [
+    ['authorize', 'remove', 'library.delete', 'list-1'],
+    ['clear', 'list-1'],
+    ['changed', 'list-1'],
+  ])
+
+  // A Host answer that does not account for every requested track must not be reported as success.
+  calls.length = 0
+  const mismatched = createHostLibraryBridge({
+    ...services,
+    async remove() {
+      return { removed: 1, notFound: 0 }
+    },
+  })
+  await assert.rejects(
+    mismatched.playlists.removeTracks({
+      target,
+      items: [track('1'), track('2')],
+      permissionKey: 'remove',
+      operation,
+    }),
+    /does not match the request/,
+  )
+  // An aborted operation must not touch the Host at all.
+  const aborted = new AbortController()
+  aborted.abort()
+  await assert.rejects(
+    bridge.playlists.removeTracks({
+      target,
+      items: [track('1')],
+      permissionKey: 'remove',
+      operation: { id: 'op', deadlineAt: 0, signal: aborted.signal },
+    }),
+  )
 })
 
 test('native views are data-only and may reference only declared actions', () => {

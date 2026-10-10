@@ -1,3 +1,4 @@
+import { assertRemovableTracks } from './validate.js'
 import { assertContentPage } from './music.js'
 import type {
   LibraryAPI,
@@ -6,14 +7,18 @@ import type {
   PlaylistImportResult,
   PlaylistLocation,
   PlaylistReference,
+  PlaylistRemoveRequest,
+  PlaylistRemoveResult,
 } from './library.js'
 import type { ContentEntity, OperationContext, Page } from './index.js'
+
+type LibraryCapability = 'library.read' | 'library.write' | 'library.delete'
 
 /** Bind these functions to existing app services. No database, account or UI is created here. */
 export interface HostLibraryServices {
   authorize(
     permissionKey: string,
-    capability: 'library.read' | 'library.write',
+    capability: LibraryCapability,
     operation: OperationContext,
     target?: PlaylistReference,
   ): Promise<void>
@@ -35,6 +40,17 @@ export interface HostLibraryServices {
   append(
     input: PlaylistImportRequest & { target: PlaylistReference },
   ): Promise<{ added: number; skipped: number }>
+  /**
+   * Delete the given tracks from an existing playlist and report how many rows
+   * were actually there. Cloud targets may need a paginated lookup first.
+   */
+  remove(
+    target: PlaylistReference,
+    items: ContentEntity[],
+    operation: OperationContext,
+  ): Promise<PlaylistRemoveResult>
+  /** Keep the playlist, drop its tracks. */
+  clear(target: PlaylistReference, operation: OperationContext): Promise<void>
   /** Notify the existing store/event bus only after persistence succeeds. */
   changed(target: PlaylistReference): void
 }
@@ -88,6 +104,38 @@ export function createHostLibraryBridge(services: HostLibraryServices): LibraryA
         const result = await services.append({ ...input, target })
         services.changed(target)
         return { cancelled: false, target, added: result.added, skipped: result.skipped }
+      },
+      async removeTracks(input: PlaylistRemoveRequest): Promise<PlaylistRemoveResult> {
+        checkTarget(input.target)
+        assertRemovableTracks(input.items)
+        input.operation.signal.throwIfAborted()
+        await services.authorize(
+          input.permissionKey,
+          'library.delete',
+          input.operation,
+          input.target,
+        )
+        input.operation.signal.throwIfAborted()
+        const result = await services.remove(input.target, input.items, input.operation)
+        const removed = Number(result?.removed) || 0
+        const notFound = Number(result?.notFound) || 0
+        if (removed + notFound !== input.items.length)
+          throw new Error('Playlist removal result does not match the request')
+        services.changed(input.target)
+        return { removed, notFound }
+      },
+      async clearPlaylist(input): Promise<void> {
+        checkTarget(input.target)
+        input.operation.signal.throwIfAborted()
+        await services.authorize(
+          input.permissionKey,
+          'library.delete',
+          input.operation,
+          input.target,
+        )
+        input.operation.signal.throwIfAborted()
+        await services.clear(input.target, input.operation)
+        services.changed(input.target)
       },
     },
   }

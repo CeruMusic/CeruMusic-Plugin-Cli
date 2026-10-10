@@ -42,9 +42,6 @@ export default definePlugin(async (ctx) => {
             title: track.title,
             subtitle: track.artist,
             playable: false,
-            // durationMs 使用毫秒；qualitySizes 只放真实字节数。
-            // 只有展示大小时使用 qualitySizeLabels；未知大小或 hash 省略。
-            // 公共平台歌曲在 ref 中声明 scope: 'provider'；私有 ID 保留所属插件/connectionId。
             metadata: { artists: [track.artist] },
             capabilities: [],
           })),
