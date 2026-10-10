@@ -140,6 +140,37 @@ export type ResolveResult =
       requestHeaders?: Record<string, string>
     }
   | { ok: false; error: MusicFault }
+
+/**
+ * 高清封面协议（可选）。
+ *
+ * 存在的意义：系统媒体控件（Windows SMTC / Linux MPRIS / macOS NowPlaying）
+ * 按整卡尺寸（约 1000px）显示封面，而平台音源在搜索/歌单阶段给出的
+ * `artworkUrl` 往往是缩略图（如 QQ 500、酷狗 240、酷我 500、网易云默认）。
+ * 把这层「按歌曲拿到尽可能高清封面」的能力开放给插件——插件最清楚自家
+ * CDN 的尺寸参数规则，可据此直接改写 URL 或另行请求，而宿主无需了解各平台差异。
+ *
+ * 可选性：插件**不实现**本方法即为不支持，宿主必须静默回落到原有 `artwork`
+ * 封面。实现时若无法给出更清晰的图，返回 `undefined` 或原样返回入参即可，
+ * 宿主会自行判定是否采纳（不会因为返回低清/相同地址而报错）。
+ */
+export interface ArtworkHiresRequest {
+  /**
+   * 完整歌曲信息（宿主透传，字段随平台而异，常见 `img`/`albumId`/`songmid`/
+   * `hash` 等）。插件可直接用它已有的 `img` 做尺寸转换，也可据此发起新请求。
+   */
+  song: JsonObject
+  /**
+   * 宿主当前已持有的封面地址（多为平台缩略图，也可能是 blob:/data: URL）。
+   * 插件可据此改写尺寸参数；若它不可用则由 `song` 重新生成更合适的地址。
+   */
+  artworkUrl?: string
+  /**
+   * 期望的长边像素提示。**不限定画质**——插件可按平台能力自由上调/下调或忽略，
+   * 最终以插件返回的地址为准。
+   */
+  targetSize?: number
+}
 export interface TrackProvider {
   search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
   resolve?(
@@ -148,6 +179,15 @@ export interface TrackProvider {
     operation: OperationContext,
   ): Promise<ResolveResult>
   lyrics?(resource: ResourceRef, operation: OperationContext): Promise<LyricsDocument>
+  /**
+   * 高清封面协议（可选）。返回一张尽可能高清的封面 URL；
+   * 无法提供时返回 `undefined`（宿主回落原封面）。
+   */
+  artworkHires?(
+    resource: ResourceRef,
+    request: ArtworkHiresRequest,
+    operation: OperationContext,
+  ): Promise<string | undefined>
 }
 export interface PlaylistProvider {
   search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>

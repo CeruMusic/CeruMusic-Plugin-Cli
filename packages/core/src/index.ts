@@ -88,7 +88,7 @@ export interface CoreSnapshot {
 
 function methodAt(value: any, path: string): ((...args: any[]) => any) | undefined {
   if (
-    !/^(tracks\.(search|resolve|lyrics|artwork|suggest|hotSearch)|playlists\.(search|categories|list|get)|charts\.(list|getTracks)|sharing\.describe)$/.test(
+    !/^(tracks\.(search|resolve|lyrics|artwork|artworkHires|suggest|hotSearch)|playlists\.(search|categories|list|get)|charts\.(list|getTracks)|sharing\.describe)$/.test(
       path,
     )
   )
@@ -350,6 +350,8 @@ export class PluginCore {
       'tracks.resolve': 2,
       'tracks.lyrics': 1,
       'tracks.artwork': 1,
+      // 高清封面协议（可选）：resource + request（+ operation 由 invokeProvider 追加）
+      'tracks.artworkHires': 2,
       'tracks.suggest': 1,
       'tracks.hotSearch': 0,
       'playlists.search': 1,
