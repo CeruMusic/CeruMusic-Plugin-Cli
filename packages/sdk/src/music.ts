@@ -244,6 +244,17 @@ export function assertResolveResult(value: unknown): asserts value is ResolveRes
     throw new Error('Invalid music fault')
 }
 
+export function normalizeLegacyLyrics(value: unknown): unknown {
+  if (
+    record(value) &&
+    value.format === undefined &&
+    value.version === 1 &&
+    Array.isArray(value.lines)
+  )
+    return { ...value, format: 'crlyric' }
+  return value
+}
+
 export function assertLyricsDocument(value: unknown): asserts value is LyricsDocument {
   if (
     !record(value) ||

@@ -126,6 +126,9 @@ export async function requestNetwork(
           .map(([k, v]) => [k, String(v)]),
       ),
       body,
+      // 跟随重定向后的最终地址。插件侧（如 QQ 音乐短链）需要它来还原真实目标，
+      // 因为重定向是由 core 内部跟随的，Location 头不会留给调用方。
+      url: url.href,
     }
   } catch (error) {
     if (axios.isAxiosError(error))

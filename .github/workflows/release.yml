@@ -35,6 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          npm_tag=v2
           # 内部依赖是精确版本，必须按依赖顺序发布：sdk ← issuer ← core ← cli ← create
           for directory in sdk issuer core cli create; do
             name=$(node -p "require('./packages/${directory}/package.json').name")
@@ -44,7 +45,7 @@ jobs:
               continue
             fi
             echo "::group::publish ${name}@${version}"
-            (cd "packages/${directory}" && npm publish)
+            (cd "packages/${directory}" && npm publish --tag "$npm_tag")
             echo "::endgroup::"
           done
       - name: Create GitHub release

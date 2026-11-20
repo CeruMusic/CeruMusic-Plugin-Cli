@@ -1,5 +1,7 @@
 # 澜音 v2 运行契约
 
+**v2 已冻结。** `0.3.16` 保留早期 v2 插件的歌词行为：音源 `tracks.lyrics`（包括顶层 `lyrics` 别名）和歌词转换器 `parse` 返回的版本 1 歌词可以省略 `format`。Core 补上 `format: 'crlyric'` 后再校验并交给宿主。错误的格式、曲目引用或歌词行仍会被拒绝；转换器 `export` 的输入契约不变。
+
 ## 数据和运行边界
 
 单个 JS 文件静态导出 manifest，后台 activate 在纯 Node worker 的独立 VM 运行，Web Surface 在 Electron 的隔离浏览器中运行。Core 校验并分发 providers、actions、playlistImporters、lyricConverters。插件负责平台业务和格式转换，应用持有本地数据库、云账号与现有页面。

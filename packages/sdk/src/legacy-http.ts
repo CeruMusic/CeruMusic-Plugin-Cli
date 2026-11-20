@@ -119,6 +119,9 @@ export function createLegacyHttpBridge(host: PluginContext) {
         headers: { ...response.headers, ...(firstLocation ? { location: url.href } : {}) },
         raw: response.body,
         url: url.href,
+        // 重定向由 Host 内部跟随，Location 头不会回传；用最终地址补上，
+        // 让需要还原短链的适配器（如 QQ 音乐 ?__= 短链）拿到真实目标。
+        finalUrl: typeof (response as any).url === 'string' ? (response as any).url : url.href,
       }
     })()
     return {

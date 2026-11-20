@@ -3,6 +3,7 @@ import {
   assertLyricsDocument,
   assertResolveResult,
   createHttpClient,
+  normalizeLegacyLyrics,
   type ContentEntity,
   type JsonObject,
   type JsonValue,
@@ -376,8 +377,11 @@ export class PluginCore {
     const result = await fn(...input, op)
     op.signal.throwIfAborted()
     if (method === 'tracks.resolve' || method === 'resolve') assertResolveResult(result)
-    else if (method === 'tracks.lyrics' || method === 'lyrics') assertLyricsDocument(result)
-    else if (
+    else if (method === 'tracks.lyrics' || method === 'lyrics') {
+      const document = normalizeLegacyLyrics(result)
+      assertLyricsDocument(document)
+      return document
+    } else if (
       [
         'tracks.search',
         'playlists.search',
@@ -448,8 +452,12 @@ export class PluginCore {
     )
       throw new Error('Invalid lyric input')
     const result = await (converter[method] as Function)(request, operationOrDefault(operation))
-    if (method === 'parse') assertLyricsDocument(result)
-    else if (
+    if (method === 'parse') {
+      const document = normalizeLegacyLyrics(result)
+      assertLyricsDocument(document)
+      return document
+    }
+    if (
       !result ||
       !['lrc', 'enhanced-lrc', 'yrc'].includes(result.format) ||
       result.format !== (request as LyricExportRequest).format ||
