@@ -37,7 +37,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           # 冻结 v2 的维护版本不能覆盖 v3 的 latest 安装入口。
           npm_tag=latest
-          if [[ "$version" == 0.* ]]; then npm_tag=v2; fi
+          if [[ "$version" == 0.* ]]; then npm_tag=legacy-v2; fi
           if [[ "$version" == *-* ]]; then npm_tag=next; fi
           # 内部依赖是精确版本，必须按依赖顺序发布：sdk ← issuer ← core ← cli ← create
           for directory in sdk issuer core cli create; do

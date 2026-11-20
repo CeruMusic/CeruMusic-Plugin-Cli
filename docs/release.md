@@ -4,7 +4,7 @@
 
 ## 双版本发布边界
 
-当前 `0.3.16` 与 `3.0.0` 的联调只使用本地 tarball。工作流已按版本选择 npm 标签：`0.x` 正式版使用 `v2`，预发布版本使用 `next`，其他正式版使用 `latest`。将来 v2 补丁应从 `release/v2` 发布；只有 `v2` 标签真正发布后才可用 `npm i @shiqianjiang/ceru-plugin-core@v2`。工作流改动仍须在正式发布前复核，本地验收不代表允许发布。
+当前 `0.3.16` 与 `3.0.0` 的联调只使用本地 tarball。工作流已按版本选择 npm 标签：`0.x` 正式版使用 `legacy-v2`，预发布版本使用 `next`，其他正式版使用 `latest`。将来 v2 补丁应从 `release/v2` 发布；只有 `legacy-v2` 标签真正发布后才可用 `npm i @shiqianjiang/ceru-plugin-core@legacy-v2`。工作流改动仍须在正式发布前复核，本地验收不代表允许发布。
 
 ## 认证：Trusted Publishing（无 token）
 
@@ -73,3 +73,8 @@ npm run pack:all
 
 - `test.yml` 仍会在 tag 推送时跑一遍双平台矩阵，与本地发布前验证重复，只是多花几分钟。
 - 历史上 0.3.x 是手工发布且没有打 tag，最后一个 tag 停在 `v0.2.5`。因此下一次发版的 Release notes 范围会覆盖 `v0.2.5` 之后的全部提交。
+
+
+2026-11-21 实际发布检查修正：npm 将 `v2` 识别为有效 SemVer 范围，拒绝作为 dist-tag（`Tag name must not be a valid SemVer range: v2`）。维护标签改为 `legacy-v2`；版本仍为 `0.3.16`，分支仍为 `release/v2`。任务书原 `--tag v2` 命令保留作设计历史，实际使用 `--tag legacy-v2`。
+
+最终离线作者套件 `ceru-devkit-3.0.0-6eb53b48ce34` 的 28 个组合已全部通过：原 8 个及续跑 20 个，均使用同一套件，分别留存日志；同时通过最终打包 v2/v3 双运行时检查。
