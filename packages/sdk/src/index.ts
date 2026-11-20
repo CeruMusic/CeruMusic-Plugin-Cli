@@ -1,8 +1,9 @@
 /// <reference path="./host-modules.d.cts" />
-/** This package defines the v2 wire/authoring contract. It does not grant Host permissions. */
+/** This package defines the v3 wire/authoring contract. It does not grant Host permissions. */
 import type { LoDashStatic } from 'lodash'
 import type { HostIconName, HostAssetName, LODASH_METHODS } from './catalog.js'
 export * from './catalog.js'
+export * from './plugins-api.js'
 export * from './http.js'
 export * from './library.js'
 export * from './validate.js'
@@ -12,7 +13,13 @@ import type { GuestAPI, GuestBootstrapAPI } from './guests.js'
 import type { PluginStorageAPI } from './storage.js'
 import type { createHttpClient, HttpClientOptions } from './http.js'
 export * from './music.js'
+export * from './streams.js'
+export * from './server.js'
+export type * from './wasm.js'
+export type * from './crypto-streams.js'
+export * from './music-api.js'
 export * from './lyrics.js'
+export * from './regions.js'
 export * from './quality.js'
 export * from './guests.js'
 export * from './share.js'
@@ -57,11 +64,6 @@ export interface ResourceRef {
 }
 export interface AssetHandle {
   readonly kind: 'asset'
-  readonly id: string
-}
-export interface MediaLease {
-  /** @deprecated v0.2 providers return direct playback URLs. */
-  readonly kind: 'media'
   readonly id: string
 }
 export interface CredentialRef {
@@ -138,6 +140,8 @@ export type ResolveResult =
       expiresAt?: number
       /** Headers the Host must attach while fetching this exact media URL. */
       requestHeaders?: Record<string, string>
+      /** Optional processing performed by the Host before playback or download. */
+      stream?: import('./streams.js').StreamSpec
     }
   | { ok: false; error: MusicFault }
 
@@ -172,6 +176,9 @@ export interface ArtworkHiresRequest {
   targetSize?: number
 }
 export interface TrackProvider {
+  suggest?(query: string, operation: OperationContext): Promise<string[]>
+  hotSearch?(operation: OperationContext): Promise<string[]>
+  artwork?(resource: ResourceRef, operation: OperationContext): Promise<string | undefined>
   search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
   resolve?(
     resource: ResourceRef,
@@ -223,32 +230,28 @@ export interface ProviderImplementation {
   playlists?: PlaylistProvider
   charts?: ChartProvider
   sharing?: SharingProvider
-  /** @deprecated Use tracks.lyrics. Kept for v2 preview compatibility. */
-  lyrics?(resource: ResourceRef, operation: OperationContext): Promise<LyricsDocument>
-  /** @deprecated Use tracks.search. */
-  search?(request: SearchRequest, operation: OperationContext): Promise<Page<ContentEntity>>
-  /** @deprecated Use tracks.resolve. */
-  resolve?(
-    resource: ResourceRef,
-    quality: string | undefined,
-    operation: OperationContext,
-  ): Promise<ResolveResult>
-  /** @deprecated Use playlists.categories. */
-  categories?(operation: OperationContext): Promise<Page<ContentEntity>>
-  /** @deprecated Use playlists.list/get or charts.getTracks. */
-  list?(
-    resource: ResourceRef,
-    cursor: string | undefined,
-    operation: OperationContext,
-  ): Promise<Page<ContentEntity>>
-  /** @deprecated Use sharing.describe. */
-  share?(
-    resource: ResourceRef,
-    policy: JsonObject,
-    operation: OperationContext,
-  ): Promise<JsonObject>
 }
+export type * from './hooks.js'
+export { publicLink } from './links.js'
+export type * from './lifecycle.js'
+import { LIFECYCLE_NAMES, type PluginOptions } from './lifecycle.js'
 export interface PluginContext extends HostServices {
+  server: import('./server.js').ServerAPI
+  streams: import('./streams.js').StreamsAPI
+  wasm: import('./wasm.js').WasmAPI
+  crypto: import('./crypto-streams.js').CryptoStreamsAPI
+  entries: { invalidate(): Promise<void>; selection(): Promise<import('./manifest.js').SourceSelection> }
+  accounts: {
+    current(accountId: string): Promise<{ connectionId: string; expired: boolean } | null>
+    reportExpired(accountId: string, connectionId: string, credential: CredentialRef): Promise<boolean>
+    register(id: string, implementation: import('./accounts.js').AccountImplementation): () => void
+  }
+  router: import('./navigation.js').PluginRouter
+  lifecycle: import('./lifecycle.js').LifecycleAPI
+  hooks: import('./hooks.js').HooksAPI
+  music: import('./music-api.js').MusicAPI
+  plugins: import('./plugins-api.js').PluginsAPI
+  services: { register(id:string, handlers:Record<string, import('./plugins-api.js').ServiceHandler>): () => void }
   modules: PluginModules
   readonly plugin: {
     id: string
@@ -348,6 +351,8 @@ export interface PluginContext extends HostServices {
         queued?: boolean
       }>
     }
+    pages: { open(pageId:string, props?:JsonObject):Promise<void>; close(pageId:string):Promise<void> }
+    views: { setState(viewId:string,state:JsonObject):Promise<void>; on(event:'mounted'|'unmounted',handler:(info:{viewId:string;instanceId:string;props:JsonObject})=>void):Disposable }
     setState(surfaceId: string, state: JsonObject): Promise<void>
     notify(message: {
       key: string
@@ -406,21 +411,44 @@ export interface GuestContext extends Pick<PluginContext, 'host' | 'utils'>, Gue
 export type LogicEntry = (ctx: PluginContext) => MaybePromise<void | Disposable>
 export type SurfaceEntry = (ctx: SurfaceContext) => MaybePromise<void | Disposable>
 export type GuestEntry = (ctx: GuestContext) => MaybePromise<void | Disposable>
-export function definePlugin(entry: LogicEntry): LogicEntry {
-  return entry
+export function definePlugin(entry: LogicEntry | PluginOptions): LogicEntry {
+  if (typeof entry === 'function') return entry
+  return ctx => {
+    const single = (ctx as PluginContext & { lifecycleOnly?: 'onInstall' | 'onUpdate' | 'onUninstall' }).lifecycleOnly
+    if (single) {
+      if (single === 'onUpdate' && entry.onUpdate) ctx.lifecycle.onUpdate(update => entry.onUpdate!(ctx, update))
+      else if (single !== 'onUpdate' && entry[single]) ctx.lifecycle[single](() => entry[single]!(ctx))
+      return
+    }
+    for (const name of LIFECYCLE_NAMES) {
+      const handler = entry[name]
+      if (!handler) continue
+      if (name === 'onThemeChange') ctx.lifecycle.onThemeChange(theme => entry.onThemeChange!(ctx, theme))
+      else if (name === 'onUpdate') ctx.lifecycle.onUpdate(update => entry.onUpdate!(ctx, update))
+      else if (name === 'onLocaleChange') ctx.lifecycle.onLocaleChange(locale => entry.onLocaleChange!(ctx, locale))
+      else if (name === 'onConfigChange' || name === 'onPermissionChange') ctx.lifecycle[name](keys => entry[name]!(ctx, keys))
+      else ctx.lifecycle[name](() => entry[name]!(ctx))
+    }
+    if (entry.onIdle) {
+      const { milliseconds, handler } = entry.onIdle
+      ctx.lifecycle.onIdle(milliseconds, () => handler(ctx))
+    }
+    return entry.setup(ctx)
+  }
 }
 export function defineSurface(entry: SurfaceEntry): SurfaceEntry {
   return entry
 }
 export { defineNativeView, assertNativeView } from './native-view.js'
 export type { NativeView, NativeViewSection, NativeViewAction } from './native-view.js'
-/** Host-side playlist delegation; import in the Electron main/renderer host, not in a plugin. */
-export { createHostLibraryBridge } from './host-library.js'
-export type { HostLibraryServices } from './host-library.js'
 export function defineGuestAdapter(entry: GuestEntry): GuestEntry {
   return entry
 }
 export function defineManifest(manifest: PluginManifest): PluginManifest {
+  if (manifest?.manifestVersion !== 3 || !manifest.entry) throw new Error('Expected a v3 manifest with entry')
+  for (const key of ['modules', 'contributes', 'permissions']) {
+    if (Object.hasOwn(manifest, key)) throw new Error('Unexpected v2 manifest field: ' + key)
+  }
   return manifest
 }
 export function definePluginConfig<const T extends JsonObject>(config: T): T {
@@ -453,6 +481,7 @@ export interface UISchema {
   id?: string
   root: UINode
 }
+export * from './events.js'
 export function defineUISchema(schema: UISchema): UISchema {
   return schema
 }

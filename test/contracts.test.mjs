@@ -13,8 +13,8 @@ import {
   assertResourceRef,
   retargetTrackRef,
   permissionGroup,
-  createHostLibraryBridge,
 } from '../packages/sdk/dist/index.js'
+import { createHostLibraryBridge } from '../packages/core/dist/host-library.js'
 import { networkPermissionKey } from '../packages/sdk/dist/http.js'
 import { compareQualities, selectQuality } from '../packages/sdk/dist/quality.js'
 
@@ -232,14 +232,14 @@ const sourceConfig = JSON.parse(
 )
 
 test('structured plugin logs are serialized before transport truncation', async () => {
-  const runtime = await readFile(resolve(workspace, 'packages/cli/runtime/sandbox.ts'), 'utf8')
+  const runtime = await readFile(resolve(workspace, 'packages/core/runtime/sandbox.ts'), 'utf8')
   assert.match(runtime, /const encoded = JSON\.stringify\(clean\(data\)\)/)
   assert.match(runtime, /console as any\)\[level\]\(formatPluginLog\(message, data\)\)/)
 })
 
 test('home sections are contribution-driven and reference declared providers', () => {
   const manifest = structuredClone(sourceConfig.manifest)
-  manifest.contributes.homeSections = [
+  manifest.ui.homeSections = [
     {
       id: 'catalog-playlists',
       title: '歌单',
@@ -248,8 +248,8 @@ test('home sections are contribution-driven and reference declared providers', (
     },
   ]
   assert.doesNotThrow(() => validateManifest(manifest))
-  manifest.contributes.homeSections[0].providerIds = ['missing']
-  assert.throws(() => validateManifest(manifest), /Unknown home section provider/)
+  manifest.ui.homeSections[0].providerIds = ['missing']
+  assert.throws(() => validateManifest(manifest), /Unknown provider/)
 })
 
 test('manifest keeps standard provider metadata separate from custom config', () => {
@@ -259,7 +259,7 @@ test('manifest keeps standard provider metadata separate from custom config', ()
     apiKey: 'customer-key',
     customBusinessField: { enabled: true },
   }
-  manifest.contributes.providers[0].qualities = ['128k', '320k', 'flac']
+  manifest.provides.providers[0].qualities = ['128k', '320k', 'flac']
   assert.doesNotThrow(() => validateManifest(manifest))
   manifest.config = 'not-an-object'
   assert.throws(() => validateManifest(manifest), /Invalid manifest/)
@@ -267,9 +267,9 @@ test('manifest keeps standard provider metadata separate from custom config', ()
 
 test('application CSS requires its grouped high-impact permission', () => {
   const manifest = structuredClone(sourceConfig.manifest)
-  manifest.contributes.styles = [{ id: 'theme', resource: 'theme.css', scope: 'application' }]
+  manifest.ui.styles = [{ id: 'theme', resource: 'theme.css', scope: 'application' }]
   assert.throws(() => validateManifest(manifest), /ui\.styles\.global/)
-  manifest.permissions.push({
+  manifest.uses?.permissions.push({
     key: 'appearance',
     name: 'ui.styles.global',
     reason: '应用用户选择的全局主题',

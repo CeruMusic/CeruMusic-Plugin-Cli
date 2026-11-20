@@ -71,7 +71,7 @@ export class GuestStore {
   }
   private adapter(id: string) {
     const manifest = this.services.artifact.header.manifest
-    const adapter = manifest.contributes?.guestAdapters?.find((item) => item.id === id)
+    const adapter = manifest.provides?.guestAdapters?.find((item) => item.id === id)
     if (!adapter || manifest.guestPolicy?.maxDepth !== 1) throw new Error('兼容环境未声明此格式')
     return adapter
   }
@@ -277,7 +277,7 @@ export class GuestStore {
               ...this.services.artifact.header,
               manifest: {
                 ...this.services.artifact.header.manifest,
-                modules: { logic: { entry: adapter.bootstrap } },
+                entry: { logic: { module: adapter.bootstrap } },
               },
             },
           },

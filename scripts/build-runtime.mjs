@@ -1,20 +1,60 @@
 import { build } from 'esbuild'
+import { gzipSync } from 'node:zlib'
+import { createRequire } from 'node:module'
 import { mkdir, writeFile, readFile, unlink, copyFile } from 'node:fs/promises'
 import { MANIFEST_SCHEMA } from '../packages/issuer/dist/index.js'
-import { HOST_ICON_NAMES } from '../packages/sdk/dist/index.js'
+import { HOST_ICON_NAMES, PLAYER_REGIONS } from '../packages/sdk/dist/index.js'
+const runtimeRequire = createRequire(new URL('../packages/core/runtime/component-view.ts', import.meta.url))
+const runtimeVersion = async name => JSON.parse(await readFile(runtimeRequire.resolve(name + '/package.json'), 'utf8')).version
+const compatibility = JSON.stringify({
+  schemaVersion: 1, hostApi: '3.0.0', logicRuntime: 'ceru-js@1',
+  componentLibraries: { vue: await runtimeVersion('vue'), 'tdesign-vue-next': await runtimeVersion('tdesign-vue-next') },
+  regions: PLAYER_REGIONS.map(name => name + '@1'),
+}, null, 2) + '\n'
+await mkdir('packages/core/assets', { recursive: true })
+await writeFile('packages/core/assets/compatibility.json', compatibility)
+await writeFile('packages/cli/assets/compatibility.json', compatibility)
+for (const base of [
+  'packages/sdk/dist/host-library',
+  'packages/cli/dist/socket-broker',
+  'packages/cli/dist/watch-project',
+  'packages/core/dist/electron',
+]) {
+  for (const suffix of ['.js', '.js.map', '.d.ts', '.d.ts.map']) {
+    await unlink(base + suffix).catch((error) => {
+      if (error.code !== 'ENOENT') throw error
+    })
+  }
+}
 await import('../packages/sdk/scripts/prepare-package.mjs')
+// The raw-Node child cannot read Electron ASAR paths. Keep its dependency
+// closure in one asset which the host extracts into a private session directory.
 await build({
-  entryPoints: ['packages/cli/runtime/sandbox.ts'],
+  entryPoints: ['packages/core/src/trusted-runtime/runner.ts'],
+  bundle: true,
+  outfile: 'packages/core/assets/trusted-runner.cjs',
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
+  legalComments: 'inline',
+})
+await build({
+  entryPoints: ['packages/core/runtime/sandbox.ts'],
   bundle: true,
   write: true,
-  outfile: 'packages/cli/assets/sandbox.js',
+  outfile: 'packages/core/assets/sandbox.js',
   platform: 'browser',
   format: 'iife',
   target: 'es2022',
   minify: true,
   legalComments: 'inline',
 })
+await build({entryPoints:['packages/core/runtime/component-view.ts'],bundle:true,platform:'browser',format:'iife',globalName:'__ceruComponentView',target:'es2022',outfile:'packages/core/assets/component-view.js',minify:true,legalComments:'inline',loader:{'.css':'text','.less':'empty'},define:{'process.env.NODE_ENV':'"production"',__VUE_OPTIONS_API__:'true',__VUE_PROD_DEVTOOLS__:'false',__VUE_PROD_HYDRATION_MISMATCH_DETAILS__:'false'}})
+// The normal renderer must share its exact Vue/SDK/TDesign instances. The
+// standalone iframe asset above remains the strict-mode fallback.
+await build({entryPoints:['packages/core/runtime/component-host.ts'],bundle:true,platform:'browser',format:'esm',target:'es2022',outfile:'packages/core/dist/component-runtime.js',external:['vue','tdesign-vue-next','@shiqianjiang/ceru-plugin-sdk','@shiqianjiang/ceru-plugin-sdk/*','@applemusic-like-lyrics/core'],loader:{'.css':'text','.less':'empty'},legalComments:'inline'})
 await mkdir('packages/core/assets', { recursive: true })
+await writeFile('packages/core/assets/component-view.js.gz', gzipSync(await readFile('packages/core/assets/component-view.js'), { level: 9 }))
 await build({
   entryPoints: ['packages/core/runtime/node-globals.ts'],
   bundle: true,
@@ -23,22 +63,7 @@ await build({
   format: 'iife',
   target: 'es2022',
 })
-await copyFile('packages/cli/assets/sandbox.js', 'packages/core/assets/sandbox.js')
 await copyFile('packages/cli/assets/catalog.json', 'packages/core/assets/catalog.json')
-await build({
-  stdin: {
-    contents:
-      "export * from './packages/sdk/src/music.ts'; export * from './packages/sdk/src/native-view.ts'; export * from './packages/sdk/src/accounts.ts'; export * from './packages/sdk/src/navigation.ts'; export * from './packages/sdk/src/permissions.ts'; export * from './packages/core/src/surface.ts';",
-    resolveDir: process.cwd(),
-    loader: 'ts',
-  },
-  bundle: true,
-  outfile: 'packages/cli/assets/core-contracts.js',
-  platform: 'browser',
-  format: 'esm',
-  target: 'es2022',
-  minify: true,
-})
 // Framework production runtimes belong to the plugin, never to the dev Host.
 const catalog = JSON.parse(await readFile('packages/cli/assets/catalog.json', 'utf8'))
 delete catalog.libraries
@@ -49,12 +74,15 @@ for (const name of ['shared-vue.js', 'shared-react.js']) {
   })
 }
 const manifest = structuredClone(MANIFEST_SCHEMA)
-manifest.properties.contributes.properties.providers.items.properties.icon.oneOf[0].properties.name =
-  {
-    type: 'string',
-    examples: HOST_ICON_NAMES,
-    description: 'Host built-in icon name; no icon file is embedded into the plugin.',
-  }
+manifest.properties.provides.properties.providers.items.properties.icon.oneOf[0].properties.name = {
+  type: 'string',
+  examples: HOST_ICON_NAMES,
+  description: 'Host built-in icon name; no icon file is embedded into the plugin.',
+}
+const pathOrId = { type: 'string', minLength: 1, maxLength: 4096 }
+for (const key of ['logic', 'share', 'server'])
+  manifest.properties.entry.properties[key].properties.module = pathOrId
+manifest.properties.entry.properties.views.items.properties.module = pathOrId
 const schema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   title: 'Ceru Plugin Build Configuration',
@@ -100,7 +128,7 @@ const schema = {
     },
     output: { type: 'string', default: 'dist/plugin.js', pattern: '\\.js$' },
   },
-  required: ['manifest', 'entries'],
+  required: ['manifest'],
   additionalProperties: false,
 }
 schema.properties.output.pattern = '\\.(?:js|jsx)$'

@@ -11,6 +11,19 @@ import type { LibraryPlaylist, PlaylistReference } from './library.js'
 import type { LyricsDocument } from './music.js'
 import type { PermissionGroup } from './permissions.js'
 import type { HostNavigationRequest } from './navigation.js'
+import type { OperationInputs, ShareOperationResult } from './hooks.js'
+import type { PermissionName } from './catalog.js'
+
+export type CallableOperation = 'track.like'|'player.play'|'player.next'|'player.pause'|'player.resume'|'player.previous'|'player.seek'|'player.setVolume'|'player.setMode'|'queue.add'|'queue.remove'|'queue.clear'|'download.create'|'share.create'|'notification.show'|'link.open'|'window.close'|'playlist.create'|'playlist.delete'|'playlist.addTracks'|'playlist.removeTracks'|'playlist.import'|'playlist.export'
+export type OperationToolResult<Name extends CallableOperation> = Name extends 'share.create' ? ShareOperationResult | null : null
+export interface OperationTool {
+  name:CallableOperation
+  description:string
+  inputSchema:JsonObject
+  outputSchema:JsonObject
+  /** null means the operation needs no additional grant (for example an in-app toast). */
+  permission:PermissionName|null
+}
 
 /** Supplied by Host actions/events. Never construct trusted intents from plugin JSON. */
 export interface ServiceCall {
@@ -103,8 +116,20 @@ export interface AppInfo {
   hostApi: string
 }
 
+export interface ListeningTrack {
+  title: string
+  artist: string
+  source: string
+}
+
 export interface HostServiceEvents {
-  'account.changed': AccountSession
+  'entries.selectionChanged': import('./manifest.js').SourceSelection
+  'player.progress': { positionMs: number; durationMs: number }
+  'track.started': { track: ListeningTrack }
+  'track.finished': { track: ListeningTrack; playedMs: number; completed: boolean }
+  'route.changed': { from: string | null; to: string | null }
+  'account.changed': AccountSession & { accountId?: string; connectionId?: string | null }
+  'account.expired': { accountId: string; connectionId: string }
   'library.changed': {
     target: PlaylistReference
     reason: 'created' | 'updated' | 'deleted' | 'synced'
@@ -121,7 +146,13 @@ export interface HostServiceEvents {
 }
 
 export const HOST_SERVICE_EVENT_NAMES = [
+  'entries.selectionChanged',
+  'player.progress',
+  'track.started',
+  'track.finished',
+  'route.changed',
   'account.changed',
+  'account.expired',
   'library.changed',
   'player.changed',
   'queue.changed',
@@ -147,6 +178,8 @@ export interface HostServices {
     openLogin(operation: OperationContext): Promise<void>
   }
   app: {
+    operations:{list():Promise<OperationTool[]>}
+    call<Name extends CallableOperation>(name:Name,input:OperationInputs[Name],call:ServiceCall):Promise<OperationToolResult<Name>>
     getInfo(): Promise<AppInfo>
     openSettings(section?: string): Promise<void>
     openExternal(url: string, call: ServiceCall): Promise<void>
@@ -266,6 +299,10 @@ export interface HostServices {
     cancel(id: string, call: ServiceCall): Promise<void>
   }
   events: {
+    on<K extends import('./events.js').OperationEventName>(
+      event: K,
+      listener: (value: import('./events.js').OperationEvent<K>) => void | Promise<void>,
+    ): Disposable
     on<K extends keyof HostServiceEvents>(
       event: K,
       listener: (value: HostServiceEvents[K]) => void,
@@ -310,28 +347,5 @@ export interface MenuContribution {
   icon?: IconRef
   when?: { kinds?: ('track' | 'playlist')[]; loggedIn?: boolean }
 }
-
-/** Explicit allowlist for future Core routing; never forward arbitrary IPC channel names. */
-export const HOST_SERVICE_METHODS = {
-  capabilities: ['list', 'get'],
-  account: ['getSession', 'getProfile', 'openLogin'],
-  app: ['getInfo', 'openSettings', 'openExternal'],
-  player: ['getState', 'play', 'pause', 'next', 'previous', 'seek', 'setVolume', 'setMode'],
-  queue: ['get', 'append', 'replace', 'remove', 'reorder'],
-  favorites: ['contains', 'add', 'remove'],
-  history: ['list'],
-  downloads: ['list', 'create', 'pause', 'resume', 'cancel', 'retry', 'reveal'],
-  files: ['pick', 'pickDirectory', 'readText', 'readBase64', 'saveText', 'writeText'],
-  clipboard: ['readText', 'writeText'],
-  localMusic: ['list', 'scan', 'getTags', 'writeTags'],
-  settings: ['get', 'update'],
-  window: ['control'],
-  hotkeys: ['register'],
-  sharing: ['create', 'revoke', 'resolve'],
-  rooms: ['getState', 'join', 'leave', 'requestTrack'],
-  devices: ['list', 'select'],
-  ai: ['generate'],
-  tasks: ['schedule', 'cancel'],
-} as const
 
 export type SerializedHostValue = JsonValue | AssetHandle

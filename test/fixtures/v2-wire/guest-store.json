@@ -1,0 +1,5 @@
+{
+  "index": "[\n  {\n    \"name\": \"Fixture\",\n    \"version\": \"1.0.0\",\n    \"id\": \"899bc0d57152417b994cd5b88a8a6b08\",\n    \"adapterId\": \"adapter\",\n    \"digest\": \"3cb078705a053785dd7547ed31e83b47656251b913f49bf17e74395954efe6a5\",\n    \"selected\": true,\n    \"grants\": [\n      \"network\",\n      \"deny:network.private\"\n    ],\n    \"providers\": [\n      {\n        \"id\": \"source\",\n        \"name\": \"Source\",\n        \"qualities\": [\n          \"low\"\n        ],\n        \"protocols\": [\n          \"music.resolve@1\"\n        ]\n      }\n    ]\n  }\n]",
+  "script": "/* @name Fixture\n@version 1.0.0 */\ninitializeGuest();\n",
+  "body": "exports.modules={'guest.main':function(ctx){ctx.handle(async (method,input)=>({method,input}));ctx.expose('initializeGuest',()=>ctx.ready({providers:[{id:'source',name:'Source',qualities:['low'],protocols:['music.resolve@1']}]}));}};"
+}

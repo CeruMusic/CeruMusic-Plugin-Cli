@@ -10,10 +10,14 @@ import {
   readArtifact,
   signArtifact,
 } from '@shiqianjiang/ceru-plugin-issuer'
-import { buildProject, scaffoldProject, TEMPLATES, writeAtomic } from './project.js'
-import { runDev } from './dev.js'
+import { buildProject, scaffoldProject, TEMPLATES, typecheckProject, writeAtomic } from './project.js'
+import { migrateProject } from './migrate.js'
+import { testHooks } from './test-hooks.js'
+import { testServices } from './test-services.js'
+import {watchProject} from './dev.js'
 import { printInitSummary, promptInit } from './init.js'
 import { PromptCancelled } from './tui.js'
+import { checkCompatibility, formatCompatibility } from './compatibility.js'
 export { buildProject, loadProject, scaffoldProject, TEMPLATES } from './project.js'
 
 const VERSION = (
@@ -29,23 +33,28 @@ const HELP =
   TEMPLATES.join('|') +
   '] [--lang ts|js]\n' +
   '  list-templates\n' +
+  '  test-hooks [--project directory] [--config tests/hooks.json]  Build and run offline playback hook scenarios\n' +
+  '  test-services [--project directory] [--config tests/services.json]  Run actions against local mockServices\n' +
+  '  migrate [--project directory]\n' +
+  '  typecheck [--project directory]  Check manifest, config types, TS and Vue without writing dist\n' +
+  '  check-compat [--project directory] [--host profile.json] [--json]  Check host API, component libraries and region versions\n' +
   '  build [--project directory] [--out dist/plugin.js]\n' +
-  '  dev [--project directory] [--port 4179] [--debug-port 9223] [--no-open]\n' +
-  '  preview <plugin.js> [--port 4179] [--debug-port 9223] [--no-open]\n' +
+  '  dev [--project directory]  Watch and build for the desktop developer mode\n' +
+  '  preview <plugin.js>  Check the artifact and print desktop preview instructions\n' +
   '  validate <plugin.js> [--trusted-key publisher.public.pem] [--json]\n' +
   '  keygen --out .keys/publisher\n' +
   '  sign <plugin.js> --key private.pem [--out signed.js] [--force]\n' +
   '  template <plugin.js> --key publisher.private.pem --issuer-key issuer.public.pem --out template.js [--policy policy.json]\n' +
   '  issue <template.js> --key issuer.private.pem --config delivery.json --out customer.js [--id delivery-id]\n\n' +
   'TypeScript is type-checked before build. Final output is one .js file.\n' +
-  'v2 Host integration is required. Validation does not execute or sandbox plugin code.\n'
+  'v3 Host integration is required. Validation does not execute or sandbox plugin code.\n'
 
 async function jsOutput(path: string, bytes: Uint8Array, force: boolean): Promise<void> {
   if (extname(path) !== '.js') throw new Error('Output must be .js containing compiled JavaScript')
   await writeAtomic(resolve(path), bytes, force)
   console.log('Wrote ' + resolve(path) + ' (' + bytes.length + ' bytes)')
 }
-export async function runCli(argv = process.argv.slice(2)): Promise<void> {
+export async function runCli(argv = process.argv.slice(2)): Promise<void | string> {
   const { values: flags, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -55,13 +64,9 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
       template: { type: 'string' },
       lang: { type: 'string' },
       project: { type: 'string' },
-      out: { type: 'string' },
-      port: { type: 'string' },
-      'debug-port': { type: 'string' },
+      host: { type: 'string' },
       'no-open': { type: 'boolean' },
-      'ensure-running': { type: 'boolean' },
-      hidden: { type: 'boolean' },
-      electron: { type: 'string' },
+      out: { type: 'string' },
       key: { type: 'string' },
       'issuer-key': { type: 'string', multiple: true },
       'trusted-key': { type: 'string', multiple: true },
@@ -92,6 +97,15 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     if (!v) throw new Error('--' + name + ' is required')
     return v
   }
+  if (command === 'test-hooks') return testHooks(flags.project ?? positionals[1] ?? '.', flags.config)
+  if (command === 'test-services') return testServices(flags.project ?? positionals[1] ?? '.', flags.config)
+  if (command === 'migrate') return migrateProject(flags.project ?? positionals[1] ?? '.')
+  if (command === 'check-compat') {
+    const result = await checkCompatibility(flags.project ?? positionals[1] ?? '.', flags.host)
+    console.log(flags.json ? JSON.stringify(result, null, 2) : formatCompatibility(result))
+    if (!result.compatible) process.exitCode = 1
+    return
+  }
   if (command === 'init') {
     let destination = positionals[1]
     let template = flags.template
@@ -119,6 +133,11 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     if (!destination) throw new Error('Specify a project directory')
     const path = await scaffoldProject(destination, { template, language })
     printInitSummary(process.stdout, path, interactive)
+    return path
+  }
+  if (command === 'typecheck') {
+    await typecheckProject(flags.project ?? positionals[1] ?? '.')
+    console.log('Typecheck passed. No distribution artifact was written.')
     return
   }
   if (command === 'build') {
@@ -126,17 +145,17 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     console.log('Built ' + output.path + ' (' + output.bytes + ' bytes)')
     return
   }
-  if (command === 'dev' || command === 'preview') {
-    if (command === 'preview' && !positionals[1]) throw new Error('An artifact file is required')
-    await runDev(flags.project ?? '.', {
-      port: Number(flags.port ?? 4179),
-      debugPort: Number(flags['debug-port'] ?? 9223),
-      noOpen: flags['no-open'],
-      hidden: flags.hidden,
-      electron: flags.electron,
-      artifact: command === 'preview' ? resolve(positionals[1]) : undefined,
-      ensureRunning: flags['ensure-running'],
-    })
+  if (command === 'dev') {
+    const controller=new AbortController(), stop=()=>controller.abort()
+    process.once('SIGINT',stop);process.once('SIGTERM',stop)
+    try {await watchProject(flags.project ?? '.',controller.signal)} finally {process.off('SIGINT',stop);process.off('SIGTERM',stop)}
+    return
+  }
+  if (command === 'preview') {
+    if (!positionals[1]) throw new Error('An artifact file is required')
+    const file = resolve(positionals[1])
+    const { header } = readArtifact(await readFile(file))
+    console.log('插件 ' + header.manifest.id + ' 已校验。请在澜音「设置 → 插件管理 → 管理设置 → 插件开发者模式」添加此文件：' + file)
     return
   }
   if (command === 'keygen') {
@@ -170,6 +189,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     const summary = {
       id: result.header.manifest.id,
       version: result.header.manifest.version,
+      manifestVersion: result.header.manifest.manifestVersion,
       bytes: bytes.length,
       modules: Object.keys(result.modules),
       resources: Object.keys(result.resources),
@@ -183,7 +203,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
     console.log(
       flags.json
         ? JSON.stringify(summary, null, 2)
-        : 'Valid Ceru v2 artifact\n' + JSON.stringify(summary, null, 2),
+        : 'Valid Ceru v3 artifact\n' + JSON.stringify(summary, null, 2),
     )
     return
   }

@@ -2,6 +2,10 @@
 
 推送 `v*` tag 触发 [`.github/workflows/release.yml`](../.github/workflows/release.yml)：校验版本后跑测试与打包，按依赖顺序把 5 个包发到 npm，再用打包产物建 GitHub Release。
 
+## 双版本发布边界
+
+当前 `0.3.16` 与 `3.0.0` 的联调只使用本地 tarball。工作流已按版本选择 npm 标签：`0.x` 正式版使用 `v2`，预发布版本使用 `next`，其他正式版使用 `latest`。将来 v2 补丁应从 `release/v2` 发布；只有 `v2` 标签真正发布后才可用 `npm i @shiqianjiang/ceru-plugin-core@v2`。工作流改动仍须在正式发布前复核，本地验收不代表允许发布。
+
 ## 认证：Trusted Publishing（无 token）
 
 发布走 npm [Trusted Publishing](https://docs.npmjs.com/trusted-publishers)（GitHub Actions OIDC），仓库里不存任何 npm token，也不需要配置 `NPM_TOKEN`。**不要给发布步骤加 `NODE_AUTH_TOKEN`**：传统 token 的优先级高于 OIDC，一旦提供就会覆盖掉可信发布。
@@ -35,21 +39,25 @@
 版本号由人工维护，5 个包（含内部精确依赖、`package-lock.json`、CLI 模板快照）必须同版本；工作流只做校验，不替改版本。
 
 ```bash
-node .release-audit/bump-native.mjs 0.3.8    # 本地 bump 脚本（见下方说明），或手工改
-npm run release:check -- v0.3.8              # 与工作流同一套校验，先本地跑一遍
-git commit -am "chore: release 0.3.8"
-git tag v0.3.8
-git push origin main --tags
+node scripts/bump-version.mjs 3.0.0
+# 如需调整模板依赖，先修改模板源仓库，再同步快照；不要直接编辑 CLI 快照。
+# node scripts/sync-templates.mjs <模板源仓库>/templates
+npm install --package-lock-only --ignore-scripts
+npm run release:check -- v3.0.0
+npm test
+npm run pack:all
 ```
 
-`.release-audit/bump-native.mjs` 是历史遗留的本地脚本，未纳入版本库（该目录被 gitignore）。它同时改写 5 个包版本、模板快照依赖与 lockfile，丢掉后需要手工做同样的四件事。
+`scripts/bump-version.mjs` 已纳入版本库，只更新五包的版本与内部精确依赖，不自动更新 lockfile 或模板源。模板应按任务书从源仓库同步，随后检查 lockfile。旧 `.release-audit/bump-native.mjs` 不在版本库中，不能作为交付步骤的依赖。
+
+以上命令仅做本地准备。检查通过后，提交、标签、推送及正式发布仍按用户明确授权执行；2026-11-21 用户已明确同意统一发布；正式状态以发布记录为准。v2 维护版使用 `release/v2` 分支和对应的 `0.3.x` 版本号，不从 v3 工作树降版本。
 
 ## 工作流做了什么
 
 1. `scripts/check-release-version.mjs`：要求 tag 版本、5 个 packages 的 `version` 与它们之间的内部依赖（精确版本）三者完全一致，否则直接失败。
 2. `npm ci` → `npm test`（ubuntu）→ `npm run pack:all`：打包会扫描产物，拒绝私钥、`.env`、`.npmrc` 与 `node_modules`；产出的 tgz 就是 Release 附件。
-3. 按 `sdk → issuer → core → cli → create` 顺序 `npm publish`。内部依赖是精确版本，顺序颠倒会在发布窗口期出现装不上的版本组合。
-4. `gh release create v0.3.8 artifacts/*.tgz --generate-notes`。
+3. 按 `sdk → issuer → core → cli → create` 顺序执行 `npm publish --tag <对应标签>`。内部依赖是精确版本，顺序颠倒会在发布窗口期出现装不上的版本组合。
+4. 使用触发工作流的标签创建 GitHub Release，附上 `artifacts/*.tgz`，并用 `--verify-tag` 确认标签已存在；不写死旧版标签。
 
 ## 失败与重跑
 

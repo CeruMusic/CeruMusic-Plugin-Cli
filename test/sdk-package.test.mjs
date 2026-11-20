@@ -68,10 +68,11 @@ import {
   type GuestInfo, type GuestProvider, type GuestAPI, type GuestBootstrapAPI,
   type ShareMusicInfo, type ShareResolverContext, type ShareResolver, type ShareResolverEntry,
   type PluginStorageAPI, type PluginStorageReadKey, type PluginStorageWriteKey,
-  type PlaylistRemoveResult, type HostLibraryServices,
+  type PlaylistRemoveResult,
   assertRemovableTracks
 } from '@shiqianjiang/ceru-plugin-sdk'
-import { createHostLibraryBridge } from '@shiqianjiang/ceru-plugin-sdk'
+// @ts-expect-error Host implementations cannot be imported from the author SDK.
+import type { HostLibraryServices } from '@shiqianjiang/ceru-plugin-sdk'
 import { assertRemovableTracks as subpathAssert } from '@shiqianjiang/ceru-plugin-sdk/validate'
 import type { GuestInfo as SubpathGuest, GuestBootstrapAPI as SubpathBootstrap } from '@shiqianjiang/ceru-plugin-sdk/guests'
 import type { ShareResolverEntry as SubpathShare } from '@shiqianjiang/ceru-plugin-sdk/share'
@@ -102,6 +103,25 @@ definePlugin((ctx) => {
   const guests: GuestAPI = ctx.guests
   const storage: PluginStorageAPI & SubpathStorage = ctx.storage
   ctx.actions.register('demo', async (_input, operation) => {
+    const shared = await ctx.app.call('share.create', {
+      track: {ref:{kind:'track',providerId:'demo',id:'one'},title:'One',metadata:{artists:[]}}
+    }, {operation,permissionKey:'share'})
+    const sharedUrl: string | undefined = shared?.url
+    // @ts-expect-error Share operations return a link object or null, not just null.
+    const invalidShare: null = shared
+    const paused: null = await ctx.app.call('player.pause', {}, {operation,permissionKey:'control'})
+    const playlist = {id:'list-1',name:'Playlist',location:'local' as const}
+    const call = {operation,permissionKey:'library'}
+    const created: null = await ctx.app.call('playlist.create',{name:'New',location:'local'},call)
+    const deleted: null = await ctx.app.call('playlist.delete',{playlist},call)
+    const added: null = await ctx.app.call('playlist.addTracks',{playlist,tracks:[]},call)
+    const removed: null = await ctx.app.call('playlist.removeTracks',{playlist,tracks:[]},call)
+    const importedPlaylist: null = await ctx.app.call('playlist.import',{value:'https://example.test/list'},call)
+    const exported: null = await ctx.app.call('playlist.export',{playlist,format:'cpl'},call)
+    // @ts-expect-error Internal resolution is not a public callable operation.
+    await ctx.app.call('player.resolve',{},call)
+    // @ts-expect-error Public export accepts only the existing host formats.
+    await ctx.app.call('playlist.export',{playlist,format:'html'},call)
     const imported: GuestInfo | null = await guests.import('legacy')
     await guests.select(imported?.id ?? null)
     if (imported) await guests.remove(imported.id)
@@ -130,24 +150,12 @@ definePlugin((ctx) => {
   })
 })
 
-export const hostBridge: HostLibraryServices = {
-  authorize: async () => {},
-  chooseTarget: async () => null,
-  list: async () => ({ items: [] }),
-  getTracks: async () => ({ items: [] }),
-  append: async () => ({ added: 0, skipped: 0 }),
-  remove: async (_target, items) => ({ removed: items.length, notFound: 0 }),
-  clear: async () => {},
-  changed: () => {}
-}
-export const bridge = createHostLibraryBridge(hostBridge)
-
 defineManifest({
-  manifestVersion: 2, id: 'example.demo', name: 'Demo', version: '1.0.0',
-  engines: { hostApi: '^2.0.0', logicRuntime: 'ceru-js@1' },
-  modules: { logic: { entry: 'main' }, share: { entry: 'share', configKeys: ['endpoint'] } },
-  contributes: {
-    commands: [{ id: 'demo', title: 'Demo', description: 'Description', action: 'demo' }],
+  manifestVersion: 3, id: 'example.demo', name: 'Demo', version: '1.0.0',
+  engines: { hostApi: '^3.0.0', logicRuntime: 'ceru-js@1' },
+  entry: { logic: { module: 'main' }, share: { module: 'share', configKeys: ['endpoint'] } },
+  provides: {
+    actions: [{ id: 'demo', title: 'Demo', description: 'Description' }],
     guestAdapters: [{
       id: 'legacy', title: 'Legacy', extensions: ['js'], format: 'legacy',
       compatibilityProfile: 'legacy@1', bootstrap: 'guest', runtime: 'ceru-js@1',

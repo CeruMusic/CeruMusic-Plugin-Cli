@@ -11,13 +11,16 @@ import {
 import { Readable, type Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { parse, parseExpressionAt } from 'acorn'
+import { assertComponentPolicy } from './component-policy.js'
 import { Ajv } from 'ajv'
+import { valid, validRange } from 'semver'
 import type { JsonObject, JsonValue, PluginManifest } from '@shiqianjiang/ceru-plugin-sdk/manifest'
 import { HOST_MODULE_NAMES, PERMISSION_NAMES } from '@shiqianjiang/ceru-plugin-sdk/catalog'
 
 export const FORMAT_VERSION = 2
 export const LIMITS = {
   file: 10 * 1024 * 1024,
+  nativeFile: 50 * 1024 * 1024,
   header: 256 * 1024,
   delivery: 16 * 1024,
   resources: 32 * 1024 * 1024,
@@ -26,13 +29,21 @@ export const LIMITS = {
 const START = '/* @ceru-plugin-v2\n'
 const END = '\n@end-ceru-plugin */\n'
 const ID = '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$'
+const NATIVE_PLATFORMS = [
+  'win32-x64',
+  'win32-arm64',
+  'darwin-x64',
+  'darwin-arm64',
+  'linux-x64',
+  'linux-arm64',
+]
 const forbidden = new Set(['__proto__', 'prototype', 'constructor'])
 const ajv = new Ajv({ strict: false, allErrors: true, ownProperties: true })
 type Ast = any
 export type Resource =
   | { type: 'json'; value: JsonValue }
   | { type: 'text'; value: string; mime?: string }
-  | { type: 'base64'; value: string; mime: string }
+  | { type: 'base64'; value: string; mime: string; sha256?: string }
 export interface Proof {
   mode: 'single@1' | 'template@1' | 'delivery@1'
   algorithm: 'ed25519'
@@ -72,6 +83,8 @@ export interface ValidationOptions {
   trustedPublicKeys?: string[]
   now?: Date
   requireUnexpiredActivation?: boolean
+  /** Defaults to the current Node platform/architecture; used by cross-platform tooling. */
+  nativePlatform?: string
 }
 
 function ensure(ok: unknown, message: string): asserts ok {
@@ -182,9 +195,18 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
   required,
   additionalProperties: false,
 })
+const list = (items: unknown) => ({ type: 'array', maxItems: 128, items })
+const choices = (values: string[]) => ({ ...list({ enum: values }), uniqueItems: true })
+const entryVisibilityRule = object({ loggedIn: { type: 'boolean' }, selectedSource: id, predicate: id, combine: { enum: ['all', 'any'] } })
+const icon = {
+  oneOf: [
+    object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
+    object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
+  ],
+}
 export const MANIFEST_SCHEMA = object(
   {
-    manifestVersion: { const: 2 },
+    manifestVersion: { const: 3 },
     id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{2,127}$' },
     name: { ...string, maxLength: 120 },
     version: {
@@ -199,26 +221,26 @@ export const MANIFEST_SCHEMA = object(
     config: { type: 'object', additionalProperties: true },
     engines: object(
       {
-        hostApi: string,
+        hostApi: { const: '^3.0.0' },
         logicRuntime: { const: 'ceru-js@1' },
-        uiSchema: string,
         libraries: object({ vue: string, react: string, 'react-dom': string }),
       },
       ['hostApi', 'logicRuntime'],
     ),
-    modules: object({
-      logic: object({ entry: id, activation: strings }, ['entry']),
-      share: object({ entry: id, configKeys: strings, guestAdapterId: id, guestGlobals: strings }, [
-        'entry',
-      ]),
-      surfaces: {
+    entry: object({
+      logic: object({ module: id, activation: strings }, ['module']),
+      share: object(
+        { module: id, configKeys: strings, guestAdapterId: id, guestGlobals: strings },
+        ['module'],
+      ),
+      views: {
         type: 'array',
         maxItems: 64,
         items: object(
           {
             id,
-            kind: { enum: ['schema', 'web', 'native'] },
-            entry: id,
+            kind: { enum: ['component', 'web', 'native'] },
+            module: id,
             title: { type: 'string', minLength: 1, maxLength: 100 },
             presentation: object(
               {
@@ -230,11 +252,38 @@ export const MANIFEST_SCHEMA = object(
             ),
             lifecycle: object({ openAction: id, closeAction: id }),
           },
-          ['id', 'kind', 'entry'],
+          ['id', 'kind', 'module'],
         ),
       },
+      server: object(
+        {
+          module: id,
+          runtime: { enum: ['sandbox', 'node'] },
+          port: { type: 'integer', minimum: 0, maximum: 65535 },
+          lan: { type: 'boolean' },
+        },
+        ['module', 'runtime'],
+      ),
+      native: list(
+        object(
+          {
+            name: {
+              type: 'string',
+              pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*\\.node$',
+              maxLength: 128,
+            },
+            platforms: {
+              type: 'object',
+              minProperties: 1,
+              propertyNames: { enum: NATIVE_PLATFORMS },
+              additionalProperties: id,
+            },
+          },
+          ['name', 'platforms'],
+        ),
+      ),
     }),
-    contributes: object({
+    provides: object({
       lyricConverters: {
         type: 'array',
         maxItems: 16,
@@ -253,6 +302,121 @@ export const MANIFEST_SCHEMA = object(
           ['id', 'title', 'formats'],
         ),
       },
+      importers: {
+        type: 'array',
+        maxItems: 64,
+        items: object(
+          {
+            id,
+            title: string,
+            description: string,
+            placeholder: string,
+            providerId: id,
+            examples: {
+              type: 'array',
+              maxItems: 16,
+              items: object({ label: string, value: string }, ['label', 'value']),
+            },
+            instructions: strings,
+          },
+          ['id', 'title'],
+        ),
+      },
+      providers: {
+        type: 'array',
+        maxItems: 64,
+        items: object(
+          {
+            id,
+            name: string,
+            protocols: strings,
+            qualities: strings,
+            when: entryVisibilityRule,
+            beforeSelect: id,
+            connectionMode: { enum: ['none', 'single', 'multiple'] },
+            icon,
+          },
+          ['id', 'name', 'protocols'],
+        ),
+      },
+      guestAdapters: {
+        type: 'array',
+        maxItems: 16,
+        items: object(
+          {
+            id,
+            format: string,
+            compatibilityProfile: string,
+            title: string,
+            extensions: strings,
+            badge: object(
+              {
+                label: { type: 'string', minLength: 1, maxLength: 24 },
+                backgroundColor: {
+                  type: 'string',
+                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
+                },
+                textColor: {
+                  type: 'string',
+                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
+                },
+              },
+              ['label', 'backgroundColor', 'textColor'],
+            ),
+            bootstrap: id,
+            runtime: { const: 'ceru-js@1' },
+            projectableProtocols: strings,
+          },
+          ['id', 'format', 'compatibilityProfile', 'bootstrap', 'runtime', 'projectableProtocols'],
+        ),
+      },
+      actions: list(object({ id, title: string, description: string, view: id }, ['id', 'title'])),
+      services: list(
+        object({ id, version: string, methods: strings, description: string }, [
+          'id',
+          'version',
+          'methods',
+        ]),
+      ),
+      accounts: list(
+        object(
+          {
+            id,
+            title: string,
+            icon,
+            multiple: { type: 'boolean' },
+            loginMethods: { ...choices(['qrcode', 'browser', 'form', 'oauth']), minItems: 1 },
+            capabilities: choices(['profile', 'likes', 'playlists', 'history', 'recommend']),
+            providers: strings,
+            view: id,
+          },
+          ['id', 'title', 'loginMethods'],
+        ),
+      ),
+    }),
+    ui: object({
+      pages: list(
+        object(
+          {
+            id,
+            title: string,
+            mount: { enum: ['sidebar', 'settings', 'home-tab', 'playlist-section'] },
+            view: id,
+            icon,
+            group: { enum: ['discover', 'library', 'tools'] },
+            order: { type: 'integer' },
+            when: entryVisibilityRule,
+          },
+          ['id', 'title', 'mount', 'view'],
+        ),
+      ),
+      regions: list(object({ region: string, view: id }, ['region', 'view'])),
+      skins: list(
+        object(
+          { id, title: string, preview: icon, regions: strings, settings: { type: 'object' } },
+          ['id', 'title', 'regions'],
+        ),
+      ),
       menus: {
         type: 'array',
         maxItems: 64,
@@ -271,31 +435,13 @@ export const MANIFEST_SCHEMA = object(
                 'search.tools',
               ],
             },
-            icon: {
-              oneOf: [
-                object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
-                object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
-              ],
-            },
+            icon,
             when: object({
               kinds: { type: 'array', items: { enum: ['track', 'playlist'] } },
               loggedIn: { type: 'boolean' },
             }),
           },
           ['id', 'slot', 'title', 'commandId'],
-        ),
-      },
-      accountItems: {
-        type: 'array',
-        maxItems: 16,
-        items: object({ id, title: string, view: id, action: id, logoutAction: id }, ['id', 'title', 'view', 'action']),
-      },
-      playlistSections: {
-        type: 'array',
-        maxItems: 32,
-        items: object(
-          { id, title: string, view: id, order: { type: 'integer', minimum: -1000, maximum: 1000 } },
-          ['id', 'title', 'view'],
         ),
       },
       homeSections: {
@@ -305,21 +451,15 @@ export const MANIFEST_SCHEMA = object(
           {
             id,
             title: string,
-            kind: { enum: ['playlists', 'charts', 'custom'] },
-            icon: {
-              oneOf: [
-                object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
-                object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
-              ],
-            },
-            view: id,
+            kind: { enum: ['playlists', 'charts'] },
+            icon,
             providerIds: strings,
             order: { type: 'integer', minimum: -1000, maximum: 1000 },
           },
           ['id', 'title', 'kind'],
         ),
       },
-      uiExtensions: {
+      slots: {
         type: 'array',
         maxItems: 64,
         items: object(
@@ -374,112 +514,31 @@ export const MANIFEST_SCHEMA = object(
           ['id', 'resource', 'scope'],
         ),
       },
-      playlistImporters: {
-        type: 'array',
-        maxItems: 64,
-        items: object(
-          {
-            id,
-            title: string,
-            description: string,
-            placeholder: string,
-            providerId: id,
-            examples: {
-              type: 'array',
-              maxItems: 16,
-              items: object({ label: string, value: string }, ['label', 'value']),
-            },
-            instructions: strings,
-          },
-          ['id', 'title'],
-        ),
-      },
-      providers: {
-        type: 'array',
-        maxItems: 64,
-        items: object(
-          {
-            id,
-            name: string,
-            protocols: strings,
-            qualities: strings,
-            connectionMode: { enum: ['none', 'single', 'multiple'] },
-            icon: {
-              oneOf: [
-                object({ kind: { const: 'host' }, name: string }, ['kind', 'name']),
-                object({ kind: { const: 'asset' }, resource: id }, ['kind', 'resource']),
-              ],
-            },
-          },
-          ['id', 'name', 'protocols'],
-        ),
-      },
-      commands: {
-        type: 'array',
-        maxItems: 128,
-        items: object({ id, title: string, description: string, action: id, view: id }, [
-          'id',
-          'title',
-          'action',
+    }),
+    uses: object({
+      plugins: list(
+        object({ pluginId: id, service: id, version: string, optional: { type: 'boolean' } }, [
+          'pluginId',
+          'service',
+          'version',
         ]),
-      },
-      sidebarItems: {
+      ),
+      permissions: {
         type: 'array',
         maxItems: 64,
-        items: object({ id, group: id, title: string, view: id }, ['id', 'group', 'title', 'view']),
-      },
-      settingsPages: {
-        type: 'array',
-        maxItems: 64,
-        items: object({ id, title: string, view: id }, ['id', 'title', 'view']),
-      },
-      guestAdapters: {
-        type: 'array',
-        maxItems: 16,
         items: object(
           {
-            id,
-            format: string,
-            compatibilityProfile: string,
-            title: string,
-            extensions: strings,
-            badge: object(
-              {
-                label: { type: 'string', minLength: 1, maxLength: 24 },
-                backgroundColor: {
-                  type: 'string',
-                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
-                },
-                textColor: {
-                  type: 'string',
-                  pattern: '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
-                },
-              },
-              ['label', 'backgroundColor', 'textColor'],
-            ),
-            bootstrap: id,
-            runtime: { const: 'ceru-js@1' },
-            projectableProtocols: strings,
+            key: id,
+            name: { enum: PERMISSION_NAMES },
+            scope: { type: 'object' },
+            reason: string,
+            optional: { type: 'boolean' },
+            requiredFor: strings,
           },
-          ['id', 'format', 'compatibilityProfile', 'bootstrap', 'runtime', 'projectableProtocols'],
+          ['key', 'name', 'reason'],
         ),
       },
     }),
-    permissions: {
-      type: 'array',
-      maxItems: 64,
-      items: object(
-        {
-          key: id,
-          name: { enum: PERMISSION_NAMES },
-          scope: { type: 'object' },
-          reason: string,
-          optional: { type: 'boolean' },
-          requiredFor: strings,
-        },
-        ['key', 'name', 'reason'],
-      ),
-    },
     guestPolicy: object(
       {
         maxDepth: { const: 1 },
@@ -501,101 +560,167 @@ export const MANIFEST_SCHEMA = object(
       ['config', 'state'],
     ),
   },
-  ['manifestVersion', 'id', 'name', 'version', 'engines', 'modules'],
+  ['manifestVersion', 'id', 'name', 'version', 'engines', 'entry'],
 )
 const checkManifest = ajv.compile(MANIFEST_SCHEMA)
 export function validateManifest(value: unknown): asserts value is PluginManifest {
   canonical(value)
-  ensure(checkManifest(value), 'Invalid manifest: ' + ajv.errorsText(checkManifest.errors))
+  if (!checkManifest(value)) {
+    const error = checkManifest.errors?.[0]
+    const field = error?.params.additionalProperty ?? error?.params.missingProperty
+    throw new Error(
+      'Invalid manifest' +
+        (error?.instancePath ?? '') +
+        (field ? '/' + field : '') +
+        ': ' +
+        (error?.message ?? 'invalid field'),
+    )
+  }
   const manifest = value as unknown as PluginManifest
+  const { entry, provides, uses, ui } = manifest
   const unique = (values: string[], label: string) =>
     ensure(new Set(values).size === values.length, 'Duplicate ' + label)
-  unique(manifest.permissions?.map((p) => p.key) ?? [], 'permission key')
-  unique(manifest.modules.surfaces?.map((p) => p.id) ?? [], 'surface id')
-  for (const menu of manifest.contributes?.menus ?? [])
-    ensure(
-      manifest.contributes?.commands?.some((command) => command.id === menu.commandId),
-      'Unknown menu command: ' + menu.commandId,
-    )
-  for (const items of Object.values(manifest.contributes ?? {}))
-    unique(
-      items.map((p) => p.id),
-      'contribution id',
-    )
-  const views = new Set(manifest.modules.surfaces?.map((p) => p.id))
-  const actions = new Set(manifest.contributes?.commands?.map((command) => command.action))
-  for (const surface of manifest.modules.surfaces ?? []) {
-    if (surface.kind === 'native') {
-      ensure(manifest.modules.logic, 'Native surfaces require a logic module')
-      ensure(actions.has(surface.entry), 'Missing native render action: ' + surface.entry)
+  for (const [label, items] of Object.entries({ ...provides, ...ui, views: entry.views })) {
+    if (items)
+      unique(
+        items.map((item: { id?: string; region?: string }) => item.id ?? item.region!),
+        label,
+      )
+  }
+  unique(
+    (uses?.permissions ?? []).map((item) => item.key),
+    'permission key',
+  )
+  unique(
+    (uses?.plugins ?? []).map((item) => JSON.stringify([item.pluginId, item.service])),
+    'service dependency',
+  )
+  for (const service of provides?.services ?? [])
+    ensure(valid(service.version), 'Invalid provides.services version: ' + service.id)
+  for (const dependency of uses?.plugins ?? [])
+    ensure(validRange(dependency.version), 'Invalid uses.plugins version: ' + dependency.pluginId)
+  const views = new Map(entry.views?.map((view) => [view.id, view]))
+  const actions = new Set(provides?.actions?.map((action) => action.id))
+  const providers = new Set(provides?.providers?.map((provider) => provider.id))
+  for (const view of views.values()) {
+    if (view.kind === 'native') {
+      ensure(entry.logic, 'Native views require a logic module')
+      ensure(actions.has(view.module), 'Missing native render action: ' + view.module)
     }
-    for (const action of Object.values(surface.lifecycle ?? {}))
+    for (const action of Object.values(view.lifecycle ?? {}))
       ensure(actions.has(action), 'Unknown surface lifecycle action: ' + action)
   }
-  for (const account of manifest.contributes?.accountItems ?? []) {
-    ensure(manifest.modules.logic, 'Account items require a logic module')
-    ensure(views.has(account.view), 'Unknown account view: ' + account.view)
-    ensure(actions.has(account.action), 'Unknown account summary action: ' + account.action)
-    if (account.logoutAction)
-      ensure(actions.has(account.logoutAction), 'Unknown account logout action: ' + account.logoutAction)
+  for (const item of [
+    ...(provides?.accounts ?? []),
+    ...(provides?.actions ?? []),
+    ...(ui?.slots ?? []),
+    ...(ui?.pages ?? []),
+  ]) {
+    if (item.view) ensure(views.has(item.view), 'Unknown view: ' + item.view)
   }
-  for (const section of manifest.contributes?.playlistSections ?? [])
+  for (const menu of ui?.menus ?? [])
+    ensure(actions.has(menu.commandId), 'Unknown menu command: ' + menu.commandId)
+  for (const item of [...(provides?.providers ?? []), ...(ui?.pages ?? [])]) {
+    if (item.when?.predicate) {
+      ensure(entry.logic, 'Visibility predicates require a logic module')
+      ensure(actions.has(item.when.predicate), 'Unknown visibility predicate: ' + item.when.predicate)
+    }
+    if (item.when?.combine) ensure(item.when.predicate, 'Visibility combine requires a predicate')
+  }
+  for (const provider of provides?.providers ?? []) {
+    if (!provider.beforeSelect) continue
+    ensure(entry.logic, 'Provider selection hooks require a logic module')
+    ensure(actions.has(provider.beforeSelect), 'Unknown provider selection action: ' + provider.beforeSelect)
+  }
+  for (const page of ui?.pages ?? []) {
     ensure(
-      manifest.modules.surfaces?.some(surface => surface.id === section.view && surface.kind === 'native'),
-      'Playlist section requires a declared native view: ' + section.view,
+      !page.group || page.mount === 'sidebar',
+      'Only sidebar pages may declare group: ' + page.id,
     )
-  const share = manifest.modules.share
-  if (share?.guestAdapterId)
+  }
+  for (const group of [
+    ...(ui?.homeSections ?? []).map((section) => section.providerIds),
+    ...(provides?.accounts ?? []).map((account) => account.providers),
+  ])
+    for (const id of group ?? []) ensure(providers.has(id), 'Unknown provider: ' + id)
+  const boundProviders = new Set<string>()
+  for (const account of provides?.accounts ?? []) {
+    for (const provider of account.providers ?? []) {
+      ensure(!boundProviders.has(provider), 'Provider is bound to multiple accounts: ' + provider)
+      boundProviders.add(provider)
+    }
+  }
+  for (const region of ui?.regions ?? [])
     ensure(
-      manifest.contributes?.guestAdapters?.some((adapter) => adapter.id === share.guestAdapterId),
-      'Unknown share guest adapter: ' + share.guestAdapterId,
+      views.get(region.view)?.kind === 'component',
+      'Region requires component view: ' + region.view,
     )
-  for (const name of share?.guestGlobals ?? [])
+  for (const skin of ui?.skins ?? [])
+    for (const name of skin.regions)
+      ensure(
+        ui?.regions?.some((region) => region.region === name),
+        'Unknown skin region: ' + name,
+      )
+  const permissions = uses?.permissions ?? []
+  const trusted = permissions.filter((permission) => permission.name === 'runtime.trusted')
+  ensure(trusted.length <= 1, 'Duplicate runtime.trusted declaration')
+  for (const permission of trusted) {
+    ensure(
+      Array.from(permission.reason.trim()).length >= 10 &&
+        Array.from(permission.reason).length <= 300,
+      'runtime.trusted reason must be 10 to 300 characters',
+    )
+    ensure(
+      !/<\s*\/?\s*[a-z!][^>]*>/i.test(permission.reason),
+      'runtime.trusted reason must be plain text without HTML tags',
+    )
+  }
+  if (entry.server?.runtime === 'node' || entry.native?.length)
+    ensure(trusted.length === 1, 'Node servers and entry.native require runtime.trusted')
+  if (entry.server?.runtime === 'sandbox')
+    ensure(
+      permissions.some((permission) => permission.name === 'network.serve'),
+      'Sandbox server requires network.serve',
+    )
+  if (entry.server?.lan)
+    ensure(
+      permissions.some((permission) => permission.name === 'network.serve.lan'),
+      'LAN server requires network.serve.lan',
+    )
+  if (entry.native?.length) {
+    ensure(entry.server?.runtime === 'node', 'entry.native requires a node server')
+    unique(entry.native.map((native) => native.name.toLowerCase()), 'native name')
+    for (const native of entry.native) {
+      ensure(
+        !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(native.name),
+        'Invalid native filename: ' + native.name,
+      )
+      for (const resource of Object.values(native.platforms))
+        ensure(
+          !/^[a-z]:/i.test(resource) && !/^\.{1,2}$/.test(resource),
+          'Invalid native resource id: ' + resource,
+        )
+    }
+  }
+  if (entry.share?.guestAdapterId)
+    ensure(
+      provides?.guestAdapters?.some((item) => item.id === entry.share!.guestAdapterId),
+      'Unknown share guest adapter: ' + entry.share.guestAdapterId,
+    )
+  for (const name of entry.share?.guestGlobals ?? [])
     ensure(
       /^[a-zA-Z_$][\w$]*$/.test(name) && !['globalThis', 'arguments', 'eval'].includes(name),
       'Invalid share guest global: ' + name,
     )
-  for (const menu of manifest.contributes?.menus ?? [])
-    ensure(
-      manifest.contributes?.commands?.some((command) => command.id === menu.commandId),
-      'Unknown menu command: ' + menu.commandId,
-    )
-  for (const items of [
-    manifest.contributes?.commands,
-    manifest.contributes?.sidebarItems,
-    manifest.contributes?.settingsPages,
-  ]) {
-    for (const item of items ?? [])
-      if (item.view) ensure(views.has(item.view), 'Unknown view: ' + item.view)
-  }
-  for (const section of manifest.contributes?.homeSections ?? []) {
-    if (section.kind === 'custom')
-      ensure(section.view && views.has(section.view), 'Custom home section requires a valid view')
-    else ensure(!section.view, 'Built-in home sections cannot replace the Host view')
-    for (const providerId of section.providerIds ?? [])
-      ensure(
-        manifest.contributes?.providers?.some((provider) => provider.id === providerId),
-        'Unknown home section provider: ' + providerId,
-      )
-  }
-  for (const extension of manifest.contributes?.uiExtensions ?? [])
-    if (extension.mode === 'wrap')
-      ensure(
-        manifest.modules.surfaces?.some(
-          (surface) => surface.id === extension.view && surface.kind === 'schema',
-        ),
-        'Wrap UI extensions require a schema view with a host-content node',
-      )
-    else ensure(views.has(extension.view), 'Unknown UI extension view: ' + extension.view)
-  for (const style of manifest.contributes?.styles ?? []) {
+  for (const style of ui?.styles ?? []) {
     ensure(style.scope !== 'slot' || style.slots?.length, 'Slot style requires slots')
     ensure(
       style.scope !== 'application' ||
-        manifest.permissions?.some((permission) => permission.name === 'ui.styles.global'),
+        uses?.permissions?.some((item) => item.name === 'ui.styles.global'),
       'Application styles require ui.styles.global',
     )
   }
-  if (manifest.contributes?.guestAdapters?.length)
+  if (provides?.guestAdapters?.length)
     ensure(manifest.guestPolicy, 'guestPolicy is required for a guest adapter')
 }
 export function digest(input: string | Uint8Array): string {
@@ -675,8 +800,12 @@ export function encodeHeader(header: ArtifactHeader): Buffer {
 }
 export function encodeArtifact(header: ArtifactHeader, body: string): Buffer {
   const result = Buffer.concat([encodeHeader(header), Buffer.from(body)])
-  ensure(result.length <= LIMITS.file, 'Artifact exceeds size limit')
+  ensure(result.length <= artifactSizeLimit(header.manifest), 'Artifact exceeds size limit')
   return result
+}
+
+function artifactSizeLimit(manifest: PluginManifest): number {
+  return manifest.entry.native?.length ? LIMITS.nativeFile : LIMITS.file
 }
 
 function mergeConfig(base: JsonObject, override: JsonObject): JsonObject {
@@ -1022,16 +1151,16 @@ function inspectBody(
       for (const [key, node] of astObject(resolveBinding(exported.get('modules'))))
         addModule(key, node)
     if (exported.has('activate')) {
-      ensure(manifest.modules.logic, 'activate requires modules.logic')
-      addModule(manifest.modules.logic.entry, exported.get('activate'))
+      ensure(manifest.entry.logic, 'activate requires entry.logic')
+      addModule(manifest.entry.logic.module, exported.get('activate'))
     }
     if (exported.has('surfaces'))
       for (const [id, node] of astObject(resolveBinding(exported.get('surfaces')))) {
-        const surface = manifest.modules.surfaces?.find(
-          (item) => item.id === id && item.kind === 'web',
+        const surface = manifest.entry.views?.find(
+          (item) => item.id === id && item.kind !== 'native',
         )
         ensure(surface, 'Unknown visible surface: ' + id)
-        addModule(surface.entry, node)
+        addModule(surface.module, node)
       }
     registry = new Map([
       ['modules', { type: 'ObjectExpression', properties }],
@@ -1073,8 +1202,10 @@ function inspectBody(
   let resourceBytes = 0
   for (const [key, resource] of Object.entries(resources)) {
     ensure(new RegExp(ID).test(key), 'Invalid resource id: ' + key)
-    exactKeys(resource, ['type', 'value', 'mime'], 'resource')
+    exactKeys(resource, ['type', 'value', 'mime', 'sha256'], 'resource')
     ensure(['json', 'text', 'base64'].includes(resource.type), 'Invalid resource type')
+    if ('sha256' in resource)
+      ensure(resource.type === 'base64', 'Only binary resources may declare sha256')
     if ('mime' in resource && resource.mime !== undefined)
       ensure(
         typeof resource.mime === 'string' && resource.mime.length <= 128,
@@ -1085,32 +1216,58 @@ function inspectBody(
       ensure(typeof resource.value === 'string', 'Text/binary resource must be a string')
       if (resource.type === 'base64') {
         ensure(
-          /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(resource.value),
+          resource.value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(resource.value),
           'Invalid base64 resource',
         )
-        resourceBytes += Buffer.from(resource.value, 'base64').length
+        const decoded = Buffer.from(resource.value, 'base64')
+        if ('sha256' in resource) {
+          ensure(
+            typeof resource.sha256 === 'string' && /^sha256:[a-f0-9]{64}$/.test(resource.sha256),
+            'Invalid resource SHA-256: ' + key,
+          )
+          ensure(resource.sha256 === digest(decoded), 'Resource SHA-256 mismatch: ' + key)
+        }
+        resourceBytes += decoded.length
       } else resourceBytes += Buffer.byteLength(resource.value)
     }
   }
   ensure(resourceBytes <= LIMITS.resources, 'Decoded resources exceed limit')
+  for (const native of manifest.entry.native ?? []) {
+    for (const resourceId of Object.values(native.platforms)) {
+      const resource = resources[resourceId]
+      ensure(
+        resource?.type === 'base64' && resource.value.length > 0,
+        'Native module requires a nonempty base64 resource: ' + resourceId,
+      )
+      ensure(resource.sha256, 'Native resource requires SHA-256: ' + resourceId)
+      ensure(
+        Buffer.from(resource.value, 'base64').toString('base64') === resource.value,
+        'Native resource must use canonical base64: ' + resourceId,
+      )
+    }
+  }
   const declared = new Set<string>()
   const add = (entry: string) => {
     ensure(Object.hasOwn(modules, entry), 'Missing module: ' + entry)
     declared.add(entry)
   }
-  if (manifest.modules.logic) add(manifest.modules.logic.entry)
-  if (manifest.modules.share) add(manifest.modules.share.entry)
-  for (const surface of manifest.modules.surfaces ?? []) {
-    if (surface.kind === 'web') add(surface.entry)
-    else if (surface.kind === 'native') ensure(manifest.contributes?.commands?.some(command => command.action === surface.entry), 'Missing native render action: ' + surface.entry)
-    else
-      ensure(resources[surface.entry]?.type === 'json', 'Missing schema resource: ' + surface.entry)
+  if (manifest.entry.logic) add(manifest.entry.logic.module)
+  if (manifest.entry.share) add(manifest.entry.share.module)
+  if (manifest.entry.server) add(manifest.entry.server.module)
+  for (const view of manifest.entry.views ?? []) {
+    if (view.kind === 'native') continue
+    add(view.module)
+    if (view.kind === 'component')
+      assertComponentPolicy(
+        modules[view.module],
+        manifest.ui?.regions?.some((region) => region.view === view.id) ?? false,
+      )
   }
-  for (const adapter of manifest.contributes?.guestAdapters ?? []) add(adapter.bootstrap)
-  for (const provider of manifest.contributes?.providers ?? [])
+  for (const adapter of manifest.provides?.guestAdapters ?? []) add(adapter.bootstrap)
+  for (const provider of manifest.provides?.providers ?? [])
     if (provider.icon?.kind === 'asset')
       ensure(Object.hasOwn(resources, provider.icon.resource), 'Missing icon resource')
-  for (const style of manifest.contributes?.styles ?? []) {
+  for (const style of manifest.ui?.styles ?? []) {
     const resource = resources[style.resource]
     ensure(resource?.type === 'text', 'Style contribution requires a text resource')
     ensure(
@@ -1130,35 +1287,66 @@ function inspectBody(
         : [],
   }
 }
-function legacyCommentArtifact(text: string): ArtifactHeader | undefined {
-  const comment = /^\/\*!([\s\S]*?)\*\//.exec(text)?.[1]
-  if (!comment || !/@name\s+(.+)/.test(comment) || !/@version\s+(.+)/.test(comment)) return
-  const value = (name: string) =>
-    new RegExp('@' + name + '\\s+([^\\r\\n*]+)').exec(comment)?.[1]?.trim() ?? ''
-  const name = value('name')
-  const version = value('version').replace(/^v/, '')
-  const id =
-    value('id') ||
-    'legacy.' +
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-  if (!id || !/^\d+\.\d+\.\d+/.test(version)) return
+function legacyComment(text: string): boolean {
+  const comment = /^\s*\/\*!([\s\S]*?)\*\//.exec(text)?.[1]
+  return !!comment && /@name[ \t]+\S/.test(comment) && /@version[ \t]+\S/.test(comment)
+}
+
+function artifactPrefix(text: string) {
+  if (text.startsWith(START)) {
+    const end = text.indexOf(END, START.length)
+    ensure(
+      end >= 0 && Buffer.byteLength(text.slice(0, end)) <= LIMITS.header,
+      'Invalid static header boundary',
+    )
+    const header = parseJsonStrict(text.slice(START.length, end))
+    return { header, end: end + END.length }
+  }
+  let offset = 0
+  function assignment(name: string): Ast | undefined {
+    const match = new RegExp('^\\s*exports\\.' + name + '\\s*=\\s*').exec(text.slice(offset))
+    if (!match) return undefined
+    const node = parseExpressionAt(text, offset + match[0].length, { ecmaVersion: 2022 }) as Ast
+    const boundary = /^[ \t]*(?:;[ \t]*(?:\r?\n)?|\r?\n|$)/.exec(text.slice(node.end))
+    ensure(boundary, 'Metadata assignments must end at a statement boundary')
+    offset = node.end + boundary[0].length
+    ensure(
+      Buffer.byteLength(text.slice(0, offset)) <= LIMITS.header,
+      'Artifact metadata is too large',
+    )
+    return node
+  }
+  const manifestNode = assignment('manifest')
+  if (!manifestNode) return legacyComment(text) ? 'legacy-comment' : null
   return {
-    formatVersion: 2,
-    syntax: 'js',
-    manifest: {
-      manifestVersion: 2,
-      id,
-      name,
-      version,
-      description: value('description'),
-      author: value('author'),
-      engines: { hostApi: '^2.0.0', logicRuntime: 'legacy-comment@1' },
-      modules: {},
+    manifestNode,
+    assignment,
+    get end() {
+      return offset
     },
-    signature: null,
+  }
+}
+
+export function sniffManifestVersion(input: Uint8Array | string): 2 | 3 | 'legacy-comment' | null {
+  try {
+    const limit = LIMITS.header + END.length + 4
+    const prefix =
+      typeof input === 'string'
+        ? input.slice(0, limit)
+        : new TextDecoder('utf-8', { fatal: true }).decode(input.subarray(0, limit), {
+            stream: input.length > limit,
+          })
+    const parsed = artifactPrefix(prefix.replace(/^\uFEFF/, ''))
+    if (!parsed || parsed === 'legacy-comment') return parsed
+    const node = parsed.manifestNode && astObject(parsed.manifestNode).get('manifestVersion')
+    const version = parsed.manifestNode
+      ? node?.type === 'Literal'
+        ? node.value
+        : null
+      : parsed.header?.manifest?.manifestVersion
+    return version === 2 || version === 3 ? version : null
+  } catch {
+    return null
   }
 }
 export function readArtifact(
@@ -1166,55 +1354,26 @@ export function readArtifact(
   options: ValidationOptions = {},
 ): Artifact {
   const bytes = typeof input === 'string' ? Buffer.from(input) : input
-  ensure(bytes.byteLength <= LIMITS.file, 'Artifact exceeds size limit')
+  ensure(bytes.byteLength <= LIMITS.nativeFile, 'Artifact exceeds size limit')
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   let header: ArtifactHeader
   let body: string
-  if (text.startsWith(START)) {
-    const end = text.indexOf(END, START.length)
-    ensure(
-      end > 0 && Buffer.byteLength(text.slice(0, end)) <= LIMITS.header,
-      'Invalid static header boundary',
-    )
-    header = parseJsonStrict(text.slice(START.length, end)) as ArtifactHeader
-    body = text.slice(end + END.length)
-  } else {
-    // Read only JSON-compatible literal metadata. Never run source to display permissions.
-    let offset = 0
-    function assignment(name: string): Ast | undefined {
-      const match = new RegExp('^\\s*exports\\.' + name + '\\s*=\\s*').exec(text.slice(offset))
-      if (!match) return undefined
-      const start = offset + match[0].length
-      const node = parseExpressionAt(text, start, { ecmaVersion: 2022 }) as Ast
-      const tail = text.slice(node.end)
-      const terminated = /^[ \t]*;[ \t]*(?:\r?\n)?/.exec(tail)
-      const asi = /^[ \t]*\r?\n/.exec(tail)
-      ensure(terminated || asi, 'Metadata assignments must end at a statement boundary')
-      offset = node.end + (terminated ?? asi)![0].length
-      ensure(
-        Buffer.byteLength(text.slice(0, offset)) <= LIMITS.header,
-        'Artifact metadata is too large',
-      )
-      return node
-    }
-    const manifestNode = assignment('manifest')
-    if (!manifestNode) {
-      const legacy = legacyCommentArtifact(text)
-      ensure(
-        !legacy,
-        'Legacy comment-header plugins are recognized for migration metadata only; convert them to exports.manifest/exports.activate before installation.',
-      )
-    }
-    ensure(manifestNode, 'Expected exports.manifest = { ... };')
-    const manifest = astJson(manifestNode) as unknown as PluginManifest
-    const packageNode = assignment('package')
+  const prefix = artifactPrefix(text.slice(0, LIMITS.header + END.length + 4))
+  ensure(
+    prefix !== 'legacy-comment',
+    'Legacy comment-header plugins are recognized for migration metadata only; import through an LX adapter.',
+  )
+  ensure(prefix, 'Expected exports.manifest = { ... };')
+  if (prefix.manifestNode) {
+    const manifest = astJson(prefix.manifestNode) as unknown as PluginManifest
+    const packageNode = prefix.assignment!('package')
     const metadata = packageNode
       ? astJson(packageNode)
       : { formatVersion: 2, syntax: 'js', signature: null }
     ensure(plain(metadata) && !Object.hasOwn(metadata, 'manifest'), 'Invalid package metadata')
     header = { ...metadata, manifest } as ArtifactHeader
-    body = text.slice(offset)
-  }
+  } else header = prefix.header as ArtifactHeader
+  body = text.slice(prefix.end)
   exactKeys(
     header,
     ['formatVersion', 'syntax', 'manifest', 'signature', 'template', 'delivery'],
@@ -1223,6 +1382,16 @@ export function readArtifact(
   ensure(header.formatVersion === 2 && header.syntax === 'js', 'Unsupported artifact format/syntax')
   ensure(Object.hasOwn(header, 'signature'), 'Signature field is required')
   validateManifest(header.manifest)
+  ensure(bytes.byteLength <= artifactSizeLimit(header.manifest), 'Artifact exceeds size limit')
+  if (header.manifest.entry.native?.length) {
+    const platform = options.nativePlatform ?? process.platform + '-' + process.arch
+    ensure(NATIVE_PLATFORMS.includes(platform), 'Unsupported native platform: ' + platform)
+    for (const native of header.manifest.entry.native)
+      ensure(
+        Object.hasOwn(native.platforms, platform),
+        'Native module does not support current platform ' + platform + ': ' + native.name,
+      )
+  }
   const codeDigest = digest(body)
   let signatureStatus: Artifact['signatureStatus'] = 'unsigned'
   let templateDigest: string | undefined
@@ -1394,7 +1563,7 @@ export class PreparedIssuer {
       this.#key,
     ).toString('base64')
     const head = encodeHeader({ ...this.#header, delivery: { payload, signature: proof } })
-    ensure(head.length + this.#core.length <= LIMITS.file, 'Issued file exceeds limit')
+    ensure(head.length + this.#core.length <= artifactSizeLimit(this.#header.manifest), 'Issued file exceeds limit')
     return head
   }
   issue(personalization: JsonObject, options?: { deliveryId?: string; now?: Date }): Buffer {

@@ -1,14 +1,42 @@
 {
   "name": "@shiqianjiang/ceru-plugin-core",
-  "version": "0.3.15",
-  "description": "Ceru Music v2 plugin Core runtime and Host adapter boundary",
+  "version": "3.0.0",
+  "description": "Ceru Music v3 plugin Core runtime and Host adapter boundary",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./component-runtime": {
+      "types": "./dist/component-runtime.d.ts",
+      "default": "./dist/component-runtime.js"
+    },
+    "./trusted": {
+      "types": "./dist/trusted-runtime/index.d.ts",
+      "default": "./dist/trusted-runtime/index.js"
+    },
+    "./server": {
+      "types": "./dist/http-server.d.ts",
+      "default": "./dist/http-server.js"
+    },
+    "./media": {
+      "types": "./dist/media-stream.d.ts",
+      "default": "./dist/media-stream.js"
+    },
+    "./operations": {
+      "types": "./dist/operation-bus.d.ts",
+      "default": "./dist/operation-bus.js"
+    },
+    "./services": {
+      "types": "./dist/service-router.d.ts",
+      "default": "./dist/service-router.js"
+    },
     "./sockets": {
       "types": "./dist/socket-broker.d.ts",
       "default": "./dist/socket-broker.js"
+    },
+    "./music": {
+      "types": "./dist/music-registry.d.ts",
+      "default": "./dist/music-registry.js"
     },
     "./node": {
       "types": "./dist/node.d.ts",
@@ -17,11 +45,6 @@
     "./network": {
       "types": "./dist/network.d.ts",
       "default": "./dist/network.js"
-    },
-    "./electron": {
-      "types": "./dist/electron.d.ts",
-      "import": "./dist/electron.js",
-      "default": "./dist/electron.js"
     },
     ".": {
       "types": "./dist/index.d.ts",
@@ -39,6 +62,18 @@
     "./surface-document": {
       "types": "./dist/surface-document.d.ts",
       "default": "./dist/surface-document.js"
+    },
+    "./host-library": {
+      "types": "./dist/host-library.d.ts",
+      "default": "./dist/host-library.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "default": "./dist/contract.js"
+    },
+    "./dispatch": {
+      "types": "./dist/dispatch.d.ts",
+      "default": "./dist/dispatch.js"
     }
   },
   "files": [
@@ -54,11 +89,12 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "socket.io-client": "^4.8.3",
-    "ws": "^8.21.3",
+    "@shiqianjiang/ceru-plugin-issuer": "3.0.0",
+    "@shiqianjiang/ceru-plugin-sdk": "3.0.0",
     "axios": "^1.13.2",
-    "@shiqianjiang/ceru-plugin-issuer": "0.3.15",
-    "@shiqianjiang/ceru-plugin-sdk": "0.3.15"
+    "semver": "^7.7.0",
+    "socket.io-client": "^4.8.3",
+    "ws": "^8.21.3"
   },
   "publishConfig": {
     "access": "public",

@@ -1,4 +1,4 @@
-# 澜音 v2 运行契约
+# 澜音 v3 运行契约
 
 ## 数据和运行边界
 
@@ -46,7 +46,7 @@ interface LyricSubLine {
 
 Provider `tracks.lyrics` 返回此结构。逐字翻译/音译使用 `translations`/`romanizations` 保留独立时间轴，并同时填写首选内容的 `translation`/`romanization` 纯文本摘要以兼容旧 Host。时间标签不是文本，禁止写入摘要字段。QRC/KRC 解密、YRC/LRC/增强 LRC/TTML 解析都在插件进行；TTML 工具及 XML 解析器作为插件依赖编入单文件，不放入宿主。
 
-插件声明 `contributes.lyricConverters` 并通过 `ctx.lyricConverters.register(id, { parse, export })` 注册。parse 支持明确格式或 auto；export 接收 CrLyric 和目标 lrc、enhanced-lrc、yrc，返回 text、mime、extension。播放端仅映射标准毫秒字段到渲染组件；下载/标签写入不二次转换。无转换插件时本地音频继续播放，非 crlyric 的嵌入歌词不可渲染。
+插件声明 `provides.lyricConverters` 并通过 `ctx.lyricConverters.register(id, { parse, export })` 注册。parse 支持明确格式或 auto；export 接收 CrLyric 和目标 lrc、enhanced-lrc、yrc，返回 text、mime、extension。播放端仅映射标准毫秒字段到渲染组件；下载/标签写入不二次转换。无转换插件时本地音频继续播放，非 crlyric 的嵌入歌词不可渲染。
 
 聆澜的网易云/QQ 歌词优先请求 TTML，超时或解析失败回退平台接口，两者都输出 crlyric。
 

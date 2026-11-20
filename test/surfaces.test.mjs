@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import { SurfaceSession } from '../packages/core/dist/surface.js'
 import { createWebSurfaceDocument } from '../packages/core/dist/surface-document.js'
 import { DevelopmentStorage } from '../packages/cli/dist/storage.js'
@@ -18,16 +19,16 @@ const manifest = config.manifest
 test('Surface contract validates lifecycle actions and presentation before installing', () => {
   assert.doesNotThrow(() => validateManifest(manifest))
   const invalid = structuredClone(manifest)
-  invalid.modules.surfaces[0].lifecycle.closeAction = 'missing'
+  invalid.entry.views[0].lifecycle.closeAction = 'missing'
   assert.throws(() => validateManifest(invalid), /Unknown surface lifecycle/)
-  invalid.modules.surfaces[0].lifecycle.closeAction = 'page.close'
-  invalid.modules.surfaces[0].presentation.size = 99999
+  invalid.entry.views[0].lifecycle.closeAction = 'page.close'
+  invalid.entry.views[0].presentation.size = 99999
   assert.throws(() => validateManifest(invalid), /Invalid manifest/)
 })
 
 test('Surface closes once, cancels pending work and rejects old session actions', async () => {
   const events = []
-  const surface = manifest.modules.surfaces[0]
+  const surface = manifest.entry.views[0]
   let pendingSignal
   const session = new SurfaceSession(surface, manifest, async (action, _input, signal) => {
     events.push(action)
@@ -61,6 +62,21 @@ test('Core document embeds the shared runtime without passing manifest credentia
   await assert.rejects(createWebSurfaceDocument(artifact, 'missing', 'session'), /Unknown/)
 })
 
+test('component document transports the complete host runtime without widening its script policy', async () => {
+  const componentManifest = structuredClone(manifest)
+  const view = componentManifest.entry.views[0]
+  view.kind = 'component'
+  const artifact = { header: { manifest: componentManifest }, modules: { [view.module]: 'function fixture() {}' }, resources: {} }
+  const { html } = await createWebSurfaceDocument(artifact, view.id, 'fixture')
+  const payload = html.match(/<script id="ceru-component-runtime" type="application\/octet-stream">([A-Za-z0-9+/=]+)<\/script>/)?.[1]
+  assert.ok(payload)
+  const runtime = await readFile(new URL('../packages/core/assets/component-view.js', import.meta.url))
+  assert.deepEqual(gunzipSync(Buffer.from(payload, 'base64')), runtime)
+  assert.ok(html.length < runtime.length)
+  assert.match(html, /script-src data:;/)
+  assert.match(html, /connect-src 'none';/)
+})
+
 test('development storage survives restart and keeps plugin namespaces separate', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ceru-storage-'))
   const a = new DevelopmentStorage(root, 'plugin.a')
@@ -77,13 +93,13 @@ test('development storage survives restart and keeps plugin namespaces separate'
 
 test('published Guest bootstrap remains executable after replacing the old local Core patch', async () => {
   const m = {
-    manifestVersion: 2,
+    manifestVersion: 3,
     id: 'test.guest-host',
     name: 'Guest Host',
     version: '1.0.0',
-    engines: { hostApi: '^2.0.0', logicRuntime: 'ceru-js@1' },
-    modules: {},
-    contributes: {
+    engines: { hostApi: '^3.0.0', logicRuntime: 'ceru-js@1' },
+    entry: {},
+    provides: {
       guestAdapters: [
         {
           id: 'adapter',

@@ -17,22 +17,22 @@ import { SurfaceSession } from '../packages/core/dist/surface.js'
 import { NodePluginSandbox } from '../packages/core/dist/node.js'
 
 const manifest = {
-  manifestVersion: 2,
+  manifestVersion: 3,
   id: 'native.test',
   name: 'Native test',
   version: '1.0.0',
-  engines: { hostApi: '^2.0.0', logicRuntime: 'ceru-js@1' },
-  modules: {
-    logic: { entry: 'logic' },
-    surfaces: [{ id: 'library', kind: 'native', entry: 'render' }],
+  engines: { hostApi: '^3.0.0', logicRuntime: 'ceru-js@1' },
+  entry: {
+    logic: { module: 'logic' },
+    views: [{ id: 'library', kind: 'native', module: 'render' }],
   },
-  contributes: {
-    commands: ['render', 'open', 'play', 'import', 'summary'].map((action) => ({
+  ui: { pages: [] },
+  provides: {
+    actions: ['render', 'open', 'play', 'import', 'summary'].map((action) => ({
       id: action,
       title: action,
-      action,
     })),
-    accountItems: [{ id: 'account', title: 'Account', view: 'library', action: 'summary' }],
+    accounts: [{ id: 'account', title: 'Account', view: 'library', loginMethods: ['form'] }],
   },
 }
 const ref = {
@@ -64,22 +64,22 @@ test('native manifest entry is a declared logic action, not a web module', () =>
   )
   assert.deepEqual(Object.keys(artifact.modules), ['logic'])
   const missingAction = structuredClone(manifest)
-  missingAction.modules.surfaces[0].entry = 'undeclared'
+  missingAction.entry.views[0].module = 'undeclared'
   assert.throws(() => validateManifest(missingAction), /native render action/)
   const missingLogic = structuredClone(manifest)
-  delete missingLogic.modules.logic
+  delete missingLogic.entry.logic
   assert.throws(() => validateManifest(missingLogic), /logic module/)
   const badAccount = structuredClone(manifest)
-  badAccount.contributes.accountItems[0].view = 'missing'
-  assert.throws(() => validateManifest(badAccount), /account view/)
-  badAccount.contributes.accountItems[0].view = 'library'
-  badAccount.contributes.accountItems[0].action = 'missing'
-  assert.throws(() => validateManifest(badAccount), /account summary action/)
-  badAccount.contributes.accountItems[0].action = 'summary'
-  badAccount.contributes.accountItems[0].logoutAction = 'missing'
-  assert.throws(() => validateManifest(badAccount), /account logout action/)
-  badAccount.contributes.accountItems[0].logoutAction = 'open'
-  badAccount.modules.surfaces[0].presentation = { kind: 'modal', size: 420 }
+  badAccount.provides.accounts[0].view = 'missing'
+  assert.throws(() => validateManifest(badAccount), /Unknown view/)
+  badAccount.provides.accounts[0].view = 'library'
+  badAccount.provides.accounts[0].action = 'missing'
+  assert.throws(() => validateManifest(badAccount), /action/)
+  delete badAccount.provides.accounts[0].action
+  badAccount.provides.accounts[0].logoutAction = 'missing'
+  assert.throws(() => validateManifest(badAccount), /logoutAction/)
+  delete badAccount.provides.accounts[0].logoutAction
+  badAccount.entry.views[0].presentation = { kind: 'modal', size: 420 }
   assert.doesNotThrow(() => validateManifest(badAccount))
 })
 
@@ -115,10 +115,10 @@ test('native wire view rejects executable, malformed and undeclared actions', as
   assert.deepEqual(await defineNativeView(async () => view)({}, {}), view)
 })
 
-test('playlist page sections require native views and navigation stays within the caller manifest', () => {
+test('playlist page sections require declared views and navigation stays within the caller manifest', () => {
   const valid = structuredClone(manifest)
-  valid.contributes.playlistSections = [
-    { id: 'owned', title: 'Library', view: 'library', order: 0 },
+  valid.ui.pages = [
+    { id: 'owned', mount: 'playlist-section', title: 'Library', view: 'library', order: 0 },
   ]
   assert.doesNotThrow(() => validateManifest(valid))
   assertNavigationRequest({ page: 'playlist', sectionId: 'owned' }, valid)
@@ -136,20 +136,20 @@ test('playlist page sections require native views and navigation stays within th
     /Unknown playlist section/,
   )
   const invalid = structuredClone(valid)
-  invalid.modules.surfaces[0].kind = 'web'
-  assert.throws(() => validateManifest(invalid), /native view/)
-  invalid.modules.surfaces[0].kind = 'native'
-  invalid.contributes.playlistSections[0].view = 'missing'
-  assert.throws(() => validateManifest(invalid), /native view/)
+  invalid.ui.pages[0].mount = 'sidebar'
+  assert.throws(() => assertNavigationRequest({page:'playlist',sectionId:'owned'}, invalid), /Unknown playlist section/)
+  invalid.entry.views[0].kind = 'native'
+  invalid.ui.pages[0].view = 'missing'
+  assert.throws(() => validateManifest(invalid), /Unknown view/)
   const duplicate = structuredClone(valid)
-  duplicate.contributes.playlistSections.push(duplicate.contributes.playlistSections[0])
+  duplicate.ui.pages.push(duplicate.ui.pages[0])
   assert.throws(() => validateManifest(duplicate), /Duplicate/)
 })
 
 test('Core sandbox rejects undeclared playlist section navigation before calling the Host', async () => {
   const m = structuredClone(manifest)
-  m.contributes.playlistSections = [{ id: 'owned', title: 'Library', view: 'library' }]
-  m.contributes.commands.push({ id: 'navigate', title: 'Navigate', action: 'navigate' })
+  m.ui.pages = [{ id: 'owned', mount: 'playlist-section', title: 'Library', view: 'library' }]
+  m.provides.actions.push({ id: 'navigate', title: 'Navigate' })
   const artifact = readArtifact(
     'exports.manifest = ' +
       JSON.stringify(m) +
@@ -185,7 +185,7 @@ test('Core sandbox rejects undeclared playlist section navigation before calling
 
 test('native Core session validates render output before returning it to a Host', async () => {
   let response = view
-  const session = new SurfaceSession(manifest.modules.surfaces[0], manifest, async () => response)
+  const session = new SurfaceSession(manifest.entry.views[0], manifest, async () => response)
   assert.deepEqual(await session.invoke('render'), view)
   response = { ...view, actions: [{ label: 'Undeclared', action: 'escape' }] }
   await assert.rejects(session.invoke('render'), /native action/)
@@ -220,7 +220,7 @@ test(
     const bundled = await build({
       stdin: {
         contents:
-          "export { NativeSurfacePreview, PlaylistPagePreview } from './packages/cli/assets/native-view.js'; export { SurfaceSession } from './packages/core/src/surface.ts'; export { observeSurfaceSize } from './packages/cli/runtime/surface-size.ts'",
+          "export { NativeSurfacePreview, PlaylistPagePreview } from './test/fixtures/native-view-host.js'; export { SurfaceSession } from './packages/core/src/surface.ts'; export { observeSurfaceSize } from './packages/core/runtime/surface-size.ts'",
         resolveDir: process.cwd(),
         loader: 'js',
       },
@@ -231,7 +231,7 @@ test(
       globalName: 'NativeContracts',
     })
     const runtime = await readFile(
-      new URL('../packages/cli/assets/sandbox.js', import.meta.url),
+      new URL('../packages/core/assets/sandbox.js', import.meta.url),
       'utf8',
     )
     const sandboxDocument =
@@ -263,8 +263,8 @@ test(
     const container = document.getElementById('preview');
     const received = []; const errors = []; let title = '<img src=x onerror=alert(1)>'; let opened = 0; let closed = 0;
     const manifest = ${JSON.stringify(manifest)};
-    manifest.contributes.commands.push(...['lifecycle.open','lifecycle.close'].map(action=>({id:action,title:action,action})));
-    const surface = {...manifest.modules.surfaces[0], lifecycle:{openAction:'lifecycle.open',closeAction:'lifecycle.close'}};
+    manifest.provides.actions.push(...['lifecycle.open','lifecycle.close'].map(action=>({id:action,title:action})));
+    const surface = {...manifest.entry.views[0], lifecycle:{openAction:'lifecycle.open',closeAction:'lifecycle.close'}};
     const expected = ${JSON.stringify(ref)};
     const dispatch = async(action,input) => {
       if(action==='lifecycle.open') {opened++;return}
@@ -275,7 +275,7 @@ test(
         items:[{ref:expected,title,capabilities:[]}]}]};
     };
     const session = new NativeContracts.SurfaceSession(surface, manifest, dispatch);
-    const preview = new NativeContracts.NativeSurfacePreview(container, session, new Set(manifest.contributes.commands.map(x=>x.action)), error=>errors.push(error.message));
+    const preview = new NativeContracts.NativeSurfacePreview(container, session, new Set(manifest.provides.actions.map(x=>x.id)), error=>errors.push(error.message));
     await preview.open();
     const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
     const check = (ok,message) => {if(!ok)throw Error(message)};
@@ -293,10 +293,10 @@ test(
     title='stale'; await preview.refresh();
     check(!container.textContent.includes('stale'), 'Disposed session refreshed');
     check(opened===1 && closed===1 && errors.length===0, 'Lifecycle or rendering failed');
-    manifest.modules.surfaces[0] = surface;
-    manifest.contributes.playlistSections = [
-      {id:'second',title:'Second',view:'library',order:10},
-      {id:'first',title:'First',view:'library',order:-1},
+    manifest.entry.views[0] = surface;
+    manifest.ui.pages = [
+      {id:'second',mount:'playlist-section',title:'Second',view:'library',order:10},
+      {id:'first',mount:'playlist-section',title:'First',view:'library',order:-1},
     ];
     const playlistPage = new NativeContracts.PlaylistPagePreview(container, manifest, dispatch, error=>errors.push(error.message));
     title='Playlist page row'; await playlistPage.open('second');
@@ -336,7 +336,7 @@ test(
         if(event.source!==frame.contentWindow)return;
         const message=event.data; const data=message.data;
         try {
-          if(message.type==='ready')post('init',{generation,kind:'logic',catalog:{icons:{},assets:{}},resources:{},manifest:{id:'rpc',version:'1',contributes:{commands:['play','cancel','hotkey'].map(action=>({id:action,action}))}}});
+          if(message.type==='ready')post('init',{generation,kind:'logic',catalog:{icons:{},assets:{}},resources:{},manifest:{id:'rpc',version:'1',provides:{actions:['play','cancel','hotkey'].map(action=>({id:action,action}))}}});
           if(message.type==='active')post('invoke',{id:'play-op',kind:'action',target:'play',method:'',args:[{}]});
           if(message.type==='failed')throw Error(data.message);
           if(message.type==='rpc'){

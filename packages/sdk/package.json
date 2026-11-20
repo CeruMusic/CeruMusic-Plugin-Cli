@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-sdk",
-  "version": "0.3.15",
+  "version": "3.0.0",
   "description": "Typed authoring contracts for Ceru Music v2 single-file plugins",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,6 +10,12 @@
     "prepack": "npm run build"
   },
   "exports": {
+    "./crypto-streams": {"types":"./dist/crypto-streams.d.ts","default":"./dist/crypto-streams.js"},
+    "./wasm": {"types":"./dist/wasm.d.ts","default":"./dist/wasm.js"},
+    "./streams": {"types":"./dist/streams.d.ts","default":"./dist/streams.js"},
+    "./vue": {"types":"./dist/vue/index.d.ts","default":"./dist/vue/index.js"},
+    "./vue/region": {"types":"./dist/vue/region.d.ts","default":"./dist/vue/region.js"},
+    "./view-bridge": {"types":"./dist/view-bridge.d.ts","default":"./dist/view-bridge.js"},
     "./quality": {
       "types": "./dist/quality.d.ts",
       "default": "./dist/quality.js"
@@ -78,11 +84,6 @@
       "import": "./dist/library.js",
       "default": "./dist/library.js"
     },
-    "./host-library": {
-      "types": "./dist/host-library.d.ts",
-      "import": "./dist/host-library.js",
-      "default": "./dist/host-library.js"
-    },
     "./sockets": {
       "types": "./dist/sockets.d.ts",
       "import": "./dist/sockets.js",
@@ -117,6 +118,10 @@
       "types": "./dist/compat/format.d.ts",
       "import": "./dist/compat/format.js",
       "default": "./dist/compat/format.js"
+    },
+    "./navigation": {
+      "types": "./dist/navigation.d.ts",
+      "default": "./dist/navigation.js"
     }
   },
   "files": [
@@ -126,6 +131,9 @@
     "LICENSE"
   ],
   "license": "MIT",
+  "peerDependencies": { "vue": "^3.5.21", "tdesign-vue-next": "^1.15.2" },
+  "peerDependenciesMeta": { "vue": {"optional":true}, "tdesign-vue-next": {"optional":true} },
+  "devDependencies": { "tdesign-vue-next": "1.15.4" },
   "dependencies": {
     "@types/lodash": "^4.17.25",
     "buffer": "^6.0.3",

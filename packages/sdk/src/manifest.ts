@@ -1,4 +1,5 @@
 import type { HostIconName, PermissionName } from './catalog.js'
+import type { LyricInputFormat } from './lyrics.js'
 import type { MenuContribution } from './services.js'
 
 export type JsonValue =
@@ -21,6 +22,8 @@ export interface PermissionDeclaration {
   requiredFor?: string[]
 }
 export interface ProviderDeclaration {
+  when?: EntryVisibilityRule
+  beforeSelect?: string
   id: string
   name: string
   protocols: string[]
@@ -29,22 +32,6 @@ export interface ProviderDeclaration {
   icon?: IconRef
   connectionMode?: 'none' | 'single' | 'multiple'
 }
-export interface SurfaceDeclaration {
-  id: string
-  kind: 'schema' | 'web' | 'native'
-  /** Native: declared action returning NativeView; Web: module; Schema: JSON resource. */
-  entry: string
-  /** Host chrome only. The plugin owns all content inside a web Surface. */
-  title?: string
-  presentation?: {
-    kind: 'drawer' | 'modal'
-    placement?: 'left' | 'right' | 'top' | 'bottom'
-    size?: number
-  }
-  /** Declared logic actions. Open runs after mounting; close runs once per session. */
-  lifecycle?: { openAction?: string; closeAction?: string }
-}
-export type HomeSectionKind = 'playlists' | 'charts' | 'custom'
 export type UISlotName =
   | 'home.header'
   | 'home.content.before'
@@ -54,25 +41,6 @@ export type UISlotName =
   | 'playlist.item.actions'
   | 'player.actions'
   | 'settings.sections'
-export interface HomeSectionContribution {
-  id: string
-  title: string
-  kind: HomeSectionKind
-  icon?: IconRef
-  /** Required for custom sections; built-in playlist/chart sections keep the existing Host UI. */
-  view?: string
-  providerIds?: string[]
-  order?: number
-}
-export interface UIExtensionContribution {
-  id: string
-  slot: UISlotName
-  mode: 'append' | 'prepend' | 'wrap' | 'replace'
-  /** Sandboxed visible Surface. Plugin JavaScript never runs in the application renderer. */
-  view: string
-  order?: number
-  when?: { loggedIn?: boolean; route?: string }
-}
 export interface StyleContribution {
   id: string
   resource: string
@@ -80,8 +48,16 @@ export interface StyleContribution {
   slots?: UISlotName[]
   order?: number
 }
-export interface PluginManifest {
-  manifestVersion: 2
+export interface GuestPolicy {
+  maxDepth: 1
+  allowedCapabilities: string[]
+  networkScopeMode: 'per-guest-user-approved'
+  allowNativeCode: false
+  allowRemoteCodeExecution: false
+}
+
+export interface PluginManifestV3 {
+  manifestVersion: 3
   id: string
   name: string
   version: string
@@ -90,75 +66,203 @@ export interface PluginManifest {
   publisher?: string
   license?: string
   homepage?: string
-  /** Static defaults for ctx.config. Build-time @file sugar is expanded into this object. */
   config?: JsonObject
   engines: {
     hostApi: string
     logicRuntime: string
-    uiSchema?: string
     libraries?: Partial<Record<'vue' | 'react' | 'react-dom', string>>
   }
-  modules: {
-    logic?: { entry: string; activation?: string[] }
-    /** Separate server-side playback resolver. Requires a compatible builder and share Host. */
+
+  entry: {
+    logic?: { module: string; activation?: string[] }
     share?: {
-      entry: string
+      module: string
       configKeys?: string[]
       guestAdapterId?: string
       guestGlobals?: string[]
     }
-    surfaces?: SurfaceDeclaration[]
+    views?: ViewDeclaration[]
+
+    server?: { module: string; runtime: 'sandbox' | 'node'; port?: number; lan?: boolean }
+
+    native?: { name: string; platforms: Record<string, string> }[]
   }
-  contributes?: {
-    lyricConverters?: {
-      id: string
-      title: string
-      formats: import('./lyrics.js').LyricInputFormat[]
-    }[]
+
+  provides?: {
     providers?: ProviderDeclaration[]
-    /** Home tabs exist only while at least one enabled plugin contributes them. */
-    homeSections?: HomeSectionContribution[]
-    /** Native sections inside the Host's existing local/cloud playlist page. */
-    playlistSections?: { id: string; title: string; view: string; order?: number }[]
-    /** Controlled UI composition. The Host owns the target DOM and lifecycle. */
-    uiExtensions?: UIExtensionContribution[]
-    /** Surface/slot styles are scoped. Application styles require ui.styles.global. */
-    styles?: StyleContribution[]
+    importers?: ImporterDeclaration[]
+    lyricConverters?: LyricConverterDeclaration[]
+    accounts?: AccountDeclaration[]
+    guestAdapters?: GuestAdapterDeclaration[]
+    services?: ServiceDeclaration[]
+    actions?: ActionDeclaration[]
+  }
+
+  uses?: {
+    permissions?: PermissionDeclaration[]
+    plugins?: PluginDependency[]
+  }
+
+  ui?: {
+    pages?: PageDeclaration[]
+    homeSections?: HomeSectionDeclaration[]
+    slots?: SlotDeclaration[]
     menus?: MenuContribution[]
-    /** Entries for the application's existing playlist import menu/dialog. */
-    playlistImporters?: {
-      id: string
-      title: string
-      providerId?: string
-      examples?: { label: string; value: string }[]
-      instructions?: string[]
-      description?: string
-      placeholder?: string
-    }[]
-    commands?: { id: string; title: string; description?: string; action: string; view?: string }[]
-    /** Subaccounts in the Host account menu. action returns AccountSummary; view owns login UI. */
-    accountItems?: { id: string; title: string; view: string; action: string; logoutAction?: string }[]
-    sidebarItems?: { id: string; group: string; title: string; view: string }[]
-    settingsPages?: { id: string; title: string; view: string }[]
-    guestAdapters?: {
-      id: string
-      title?: string
-      extensions?: string[]
-      format: string
-      badge?: { label: string; backgroundColor: string; textColor: string }
-      compatibilityProfile: string
-      bootstrap: string
-      runtime: string
-      projectableProtocols: string[]
-    }[]
+    styles?: StyleContribution[]
+
+    regions?: RegionDeclaration[]
+    skins?: SkinDeclaration[]
   }
-  permissions?: PermissionDeclaration[]
-  guestPolicy?: {
-    maxDepth: 1
-    allowedCapabilities: string[]
-    networkScopeMode: 'per-guest-user-approved'
-    allowNativeCode: false
-    allowRemoteCodeExecution: false
-  }
+
+  guestPolicy?: GuestPolicy
   dataSchemas?: { config: number; state: number }
 }
+
+export interface ViewDeclaration {
+  id: string
+  kind: 'component' | 'web' | 'native'
+
+  module: string
+  title?: string
+  presentation?: {
+    kind: 'drawer' | 'modal'
+    placement?: 'left' | 'right' | 'top' | 'bottom'
+    size?: number
+  }
+  lifecycle?: { openAction?: string; closeAction?: string }
+}
+
+export interface ActionDeclaration {
+  id: string
+  title: string
+  description?: string
+
+  view?: string
+}
+
+export interface ImporterDeclaration {
+  id: string
+  title: string
+  providerId?: string
+  examples?: { label: string; value: string }[]
+  instructions?: string[]
+  description?: string
+  placeholder?: string
+}
+
+export interface LyricConverterDeclaration {
+  id: string
+  title: string
+  formats: LyricInputFormat[]
+}
+
+export interface AccountDeclaration {
+  id: string
+  title: string
+  icon?: IconRef
+
+  multiple?: boolean
+  loginMethods: ('qrcode' | 'browser' | 'form' | 'oauth')[]
+
+  capabilities?: ('profile' | 'likes' | 'playlists' | 'history' | 'recommend')[]
+
+  providers?: string[]
+
+  view?: string
+}
+
+export interface GuestAdapterDeclaration {
+  id: string
+  title?: string
+  extensions?: string[]
+  format: string
+  badge?: { label: string; backgroundColor: string; textColor: string }
+  compatibilityProfile: string
+  bootstrap: string
+  runtime: string
+  projectableProtocols: string[]
+}
+
+export interface ServiceDeclaration {
+  id: string
+  version: string
+  methods: string[]
+  description?: string
+}
+
+export interface PluginDependency {
+  pluginId: string
+  service: string
+  version: string
+  optional?: boolean
+}
+
+export interface EntryVisibilityRule {
+  loggedIn?: boolean
+  selectedSource?: string
+  predicate?: string
+  combine?: 'all' | 'any'
+}
+
+export type EntryVisibilityDecision = boolean | 'force-show' | 'force-hide'
+export type ProviderEntryDecision = EntryVisibilityDecision | { state: 'disabled'; reason?: string }
+export interface ProviderEntryContext extends SourceSelection { providerId: string }
+export type ProviderSelectionDecision = boolean | {
+  login: { accountId: string; method?: AccountDeclaration['loginMethods'][number]; connectionId?: string }
+}
+
+export interface SourceSelection {
+  selectedSource: string | null
+  selectedProvider: string | null
+}
+
+export interface EntryVisibilityContext extends SourceSelection {
+  pageId: string
+}
+
+export interface PageDeclaration {
+  id: string
+  title: string
+  mount: 'sidebar' | 'settings' | 'home-tab' | 'playlist-section'
+  view: string
+  icon?: IconRef
+
+  group?: 'discover' | 'library' | 'tools'
+  order?: number
+  when?: EntryVisibilityRule
+}
+
+export interface HomeSectionDeclaration {
+  id: string
+  title: string
+  kind: 'playlists' | 'charts'
+  providerIds?: string[]
+  icon?: IconRef
+  order?: number
+}
+
+export interface SlotDeclaration {
+  id: string
+  slot: UISlotName
+  mode: 'append' | 'prepend' | 'wrap' | 'replace'
+  view: string
+  order?: number
+  when?: { loggedIn?: boolean; route?: string }
+}
+
+export interface RegionDeclaration {
+  region: string
+  view: string
+}
+
+export interface SkinDeclaration {
+  id: string
+  title: string
+  preview?: IconRef
+
+  regions: string[]
+
+  settings?: JsonObject
+}
+
+export type PluginManifest = PluginManifestV3

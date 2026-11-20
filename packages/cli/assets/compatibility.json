@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "hostApi": "3.0.0",
+  "logicRuntime": "ceru-js@1",
+  "componentLibraries": {
+    "vue": "3.5.43",
+    "tdesign-vue-next": "1.15.4"
+  },
+  "regions": [
+    "player.lyrics@1",
+    "player.artwork@1",
+    "player.background@1",
+    "player.visualizer@1",
+    "player.songInfo@1",
+    "player.stage@1",
+    "desktopLyric@1"
+  ]
+}

@@ -11,7 +11,7 @@
       "type": "object",
       "properties": {
         "manifestVersion": {
-          "const": 2
+          "const": 3
         },
         "id": {
           "type": "string",
@@ -59,17 +59,10 @@
           "type": "object",
           "properties": {
             "hostApi": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4096
+              "const": "^3.0.0"
             },
             "logicRuntime": {
               "const": "ceru-js@1"
-            },
-            "uiSchema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4096
             },
             "libraries": {
               "type": "object",
@@ -100,15 +93,16 @@
           ],
           "additionalProperties": false
         },
-        "modules": {
+        "entry": {
           "type": "object",
           "properties": {
             "logic": {
               "type": "object",
               "properties": {
-                "entry": {
+                "module": {
                   "type": "string",
-                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  "minLength": 1,
+                  "maxLength": 4096
                 },
                 "activation": {
                   "type": "array",
@@ -122,16 +116,17 @@
                 }
               },
               "required": [
-                "entry"
+                "module"
               ],
               "additionalProperties": false
             },
             "share": {
               "type": "object",
               "properties": {
-                "entry": {
+                "module": {
                   "type": "string",
-                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  "minLength": 1,
+                  "maxLength": 4096
                 },
                 "configKeys": {
                   "type": "array",
@@ -159,11 +154,11 @@
                 }
               },
               "required": [
-                "entry"
+                "module"
               ],
               "additionalProperties": false
             },
-            "surfaces": {
+            "views": {
               "type": "array",
               "maxItems": 64,
               "items": {
@@ -175,14 +170,15 @@
                   },
                   "kind": {
                     "enum": [
-                      "schema",
+                      "component",
                       "web",
                       "native"
                     ]
                   },
-                  "entry": {
+                  "module": {
                     "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                    "minLength": 1,
+                    "maxLength": 4096
                   },
                   "title": {
                     "type": "string",
@@ -236,7 +232,73 @@
                 "required": [
                   "id",
                   "kind",
-                  "entry"
+                  "module"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "server": {
+              "type": "object",
+              "properties": {
+                "module": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "runtime": {
+                  "enum": [
+                    "sandbox",
+                    "node"
+                  ]
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "lan": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "module",
+                "runtime"
+              ],
+              "additionalProperties": false
+            },
+            "native": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*\\.node$",
+                    "maxLength": 128
+                  },
+                  "platforms": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "enum": [
+                        "win32-x64",
+                        "win32-arm64",
+                        "darwin-x64",
+                        "darwin-arm64",
+                        "linux-x64",
+                        "linux-arm64"
+                      ]
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "platforms"
                 ],
                 "additionalProperties": false
               }
@@ -245,7 +307,7 @@
           "required": [],
           "additionalProperties": false
         },
-        "contributes": {
+        "provides": {
           "type": "object",
           "properties": {
             "lyricConverters": {
@@ -284,6 +346,782 @@
                   "id",
                   "title",
                   "formats"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "importers": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "placeholder": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "providerId": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "examples": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "instructions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "providers": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "protocols": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "qualities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "when": {
+                    "type": "object",
+                    "properties": {
+                      "loggedIn": {
+                        "type": "boolean"
+                      },
+                      "selectedSource": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      },
+                      "predicate": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      },
+                      "combine": {
+                        "enum": [
+                          "all",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  "beforeSelect": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "connectionMode": {
+                    "enum": [
+                      "none",
+                      "single",
+                      "multiple"
+                    ]
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "protocols"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "guestAdapters": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "compatibilityProfile": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "extensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "badge": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 24
+                      },
+                      "backgroundColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+                      },
+                      "textColor": {
+                        "type": "string",
+                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "backgroundColor",
+                      "textColor"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "bootstrap": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "runtime": {
+                    "const": "ceru-js@1"
+                  },
+                  "projectableProtocols": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "format",
+                  "compatibilityProfile",
+                  "bootstrap",
+                  "runtime",
+                  "projectableProtocols"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "actions": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "services": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "methods": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "methods"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "accounts": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "multiple": {
+                    "type": "boolean"
+                  },
+                  "loginMethods": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "enum": [
+                        "qrcode",
+                        "browser",
+                        "form",
+                        "oauth"
+                      ]
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "enum": [
+                        "profile",
+                        "likes",
+                        "playlists",
+                        "history",
+                        "recommend"
+                      ]
+                    },
+                    "uniqueItems": true
+                  },
+                  "providers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "loginMethods"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "pages": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "mount": {
+                    "enum": [
+                      "sidebar",
+                      "settings",
+                      "home-tab",
+                      "playlist-section"
+                    ]
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "icon": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "group": {
+                    "enum": [
+                      "discover",
+                      "library",
+                      "tools"
+                    ]
+                  },
+                  "order": {
+                    "type": "integer"
+                  },
+                  "when": {
+                    "type": "object",
+                    "properties": {
+                      "loggedIn": {
+                        "type": "boolean"
+                      },
+                      "selectedSource": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      },
+                      "predicate": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                      },
+                      "combine": {
+                        "enum": [
+                          "all",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "mount",
+                  "view"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "regions": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "region": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "view": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  }
+                },
+                "required": [
+                  "region",
+                  "view"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "skins": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "preview": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "host"
+                          },
+                          "name": {
+                            "type": "string",
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "asset"
+                          },
+                          "resource": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "resource"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "regions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "maxItems": 128,
+                    "uniqueItems": true
+                  },
+                  "settings": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "regions"
                 ],
                 "additionalProperties": false
               }
@@ -331,8 +1169,34 @@
                           },
                           "name": {
                             "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4096
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
                           }
                         },
                         "required": [
@@ -389,76 +1253,6 @@
                 "additionalProperties": false
               }
             },
-            "accountItems": {
-              "type": "array",
-              "maxItems": 16,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "action": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "logoutAction": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  }
-                },
-                "required": [
-                  "id",
-                  "title",
-                  "view",
-                  "action"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "playlistSections": {
-              "type": "array",
-              "maxItems": 32,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "order": {
-                    "type": "integer",
-                    "minimum": -1000,
-                    "maximum": 1000
-                  }
-                },
-                "required": [
-                  "id",
-                  "title",
-                  "view"
-                ],
-                "additionalProperties": false
-              }
-            },
             "homeSections": {
               "type": "array",
               "maxItems": 32,
@@ -477,8 +1271,7 @@
                   "kind": {
                     "enum": [
                       "playlists",
-                      "charts",
-                      "custom"
+                      "charts"
                     ]
                   },
                   "icon": {
@@ -491,8 +1284,34 @@
                           },
                           "name": {
                             "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4096
+                            "examples": [
+                              "platform.tx",
+                              "platform.kg",
+                              "platform.kw",
+                              "platform.wy",
+                              "platform.mg",
+                              "platform.local",
+                              "platform.all",
+                              "search",
+                              "music-note",
+                              "library",
+                              "cloud",
+                              "server",
+                              "import",
+                              "chart",
+                              "settings",
+                              "play",
+                              "pause",
+                              "download",
+                              "share",
+                              "account",
+                              "heart",
+                              "refresh",
+                              "close",
+                              "add",
+                              "info"
+                            ],
+                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
                           }
                         },
                         "required": [
@@ -520,10 +1339,6 @@
                       }
                     ]
                   },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
                   "providerIds": {
                     "type": "array",
                     "items": {
@@ -548,7 +1363,7 @@
                 "additionalProperties": false
               }
             },
-            "uiExtensions": {
+            "slots": {
               "type": "array",
               "maxItems": 64,
               "items": {
@@ -662,359 +1477,132 @@
                 ],
                 "additionalProperties": false
               }
-            },
-            "playlistImporters": {
-              "type": "array",
-              "maxItems": 64,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "description": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "placeholder": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "providerId": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "examples": {
-                    "type": "array",
-                    "maxItems": 16,
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "label": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4096
-                        },
-                        "value": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 4096
-                        }
-                      },
-                      "required": [
-                        "label",
-                        "value"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "instructions": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096
-                    },
-                    "maxItems": 128,
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "id",
-                  "title"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "providers": {
-              "type": "array",
-              "maxItems": 64,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "protocols": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096
-                    },
-                    "maxItems": 128,
-                    "uniqueItems": true
-                  },
-                  "qualities": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096
-                    },
-                    "maxItems": 128,
-                    "uniqueItems": true
-                  },
-                  "connectionMode": {
-                    "enum": [
-                      "none",
-                      "single",
-                      "multiple"
-                    ]
-                  },
-                  "icon": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "const": "host"
-                          },
-                          "name": {
-                            "type": "string",
-                            "examples": [
-                              "platform.tx",
-                              "platform.kg",
-                              "platform.kw",
-                              "platform.wy",
-                              "platform.mg",
-                              "platform.local",
-                              "platform.all",
-                              "search",
-                              "music-note",
-                              "library",
-                              "cloud",
-                              "server",
-                              "import",
-                              "chart",
-                              "settings",
-                              "play",
-                              "pause",
-                              "download",
-                              "share",
-                              "account",
-                              "heart",
-                              "refresh",
-                              "close",
-                              "add",
-                              "info"
-                            ],
-                            "description": "Host built-in icon name; no icon file is embedded into the plugin."
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "const": "asset"
-                          },
-                          "resource": {
-                            "type": "string",
-                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "resource"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "protocols"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "commands": {
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "uses": {
+          "type": "object",
+          "properties": {
+            "plugins": {
               "type": "array",
               "maxItems": 128,
               "items": {
                 "type": "object",
                 "properties": {
-                  "id": {
+                  "pluginId": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
                   },
-                  "title": {
+                  "service": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  },
+                  "version": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 4096
                   },
-                  "description": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "action": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  "optional": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
-                  "id",
-                  "title",
-                  "action"
+                  "pluginId",
+                  "service",
+                  "version"
                 ],
                 "additionalProperties": false
               }
             },
-            "sidebarItems": {
+            "permissions": {
               "type": "array",
               "maxItems": 64,
               "items": {
                 "type": "object",
                 "properties": {
-                  "id": {
+                  "key": {
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
                   },
-                  "group": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  "name": {
+                    "enum": [
+                      "account.profile",
+                      "downloads.manage",
+                      "localMusic.read",
+                      "localMusic.write",
+                      "settings.read",
+                      "settings.write",
+                      "window.control",
+                      "hotkeys.register",
+                      "rooms.read",
+                      "rooms.control",
+                      "ai.use",
+                      "devices.control",
+                      "ui.styles.global",
+                      "network.request",
+                      "network.socket",
+                      "network.private",
+                      "network.discovery",
+                      "network.serve",
+                      "network.serve.lan",
+                      "streams.transform",
+                      "runtime.trusted",
+                      "credentials.use",
+                      "credentials.read",
+                      "credentials.capture",
+                      "library.read",
+                      "library.write",
+                      "library.delete",
+                      "player.read",
+                      "route.read",
+                      "navigation.intercept",
+                      "music.read",
+                      "music.control",
+                      "player.control",
+                      "player.intercept",
+                      "account.intercept",
+                      "library.intercept",
+                      "search.intercept",
+                      "search.read",
+                      "links.read",
+                      "notifications.read",
+                      "window.read",
+                      "window.intercept",
+                      "lyrics.intercept",
+                      "downloads.intercept",
+                      "sharing.intercept",
+                      "links.intercept",
+                      "notifications.intercept",
+                      "playback.fallback.hold",
+                      "files.read",
+                      "files.write",
+                      "downloads.create",
+                      "clipboard.read",
+                      "clipboard.write",
+                      "notifications.system",
+                      "external.open",
+                      "background.run",
+                      "services.consume",
+                      "sharing.publish",
+                      "sharing.revoke",
+                      "guests.manage",
+                      "guests.run"
+                    ]
                   },
-                  "title": {
+                  "scope": {
+                    "type": "object"
+                  },
+                  "reason": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 4096
                   },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  }
-                },
-                "required": [
-                  "id",
-                  "group",
-                  "title",
-                  "view"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "settingsPages": {
-              "type": "array",
-              "maxItems": 64,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+                  "optional": {
+                    "type": "boolean"
                   },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "view": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  }
-                },
-                "required": [
-                  "id",
-                  "title",
-                  "view"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "guestAdapters": {
-              "type": "array",
-              "maxItems": 16,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "format": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "compatibilityProfile": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 4096
-                  },
-                  "extensions": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 4096
-                    },
-                    "maxItems": 128,
-                    "uniqueItems": true
-                  },
-                  "badge": {
-                    "type": "object",
-                    "properties": {
-                      "label": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 24
-                      },
-                      "backgroundColor": {
-                        "type": "string",
-                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
-                      },
-                      "textColor": {
-                        "type": "string",
-                        "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
-                      }
-                    },
-                    "required": [
-                      "label",
-                      "backgroundColor",
-                      "textColor"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "bootstrap": {
-                    "type": "string",
-                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-                  },
-                  "runtime": {
-                    "const": "ceru-js@1"
-                  },
-                  "projectableProtocols": {
+                  "requiredFor": {
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -1026,12 +1614,9 @@
                   }
                 },
                 "required": [
-                  "id",
-                  "format",
-                  "compatibilityProfile",
-                  "bootstrap",
-                  "runtime",
-                  "projectableProtocols"
+                  "key",
+                  "name",
+                  "reason"
                 ],
                 "additionalProperties": false
               }
@@ -1039,88 +1624,6 @@
           },
           "required": [],
           "additionalProperties": false
-        },
-        "permissions": {
-          "type": "array",
-          "maxItems": 64,
-          "items": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string",
-                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
-              },
-              "name": {
-                "enum": [
-                  "account.profile",
-                  "downloads.manage",
-                  "localMusic.read",
-                  "localMusic.write",
-                  "settings.read",
-                  "settings.write",
-                  "window.control",
-                  "hotkeys.register",
-                  "rooms.read",
-                  "rooms.control",
-                  "ai.use",
-                  "devices.control",
-                  "ui.styles.global",
-                  "network.request",
-                  "network.socket",
-                  "network.private",
-                  "network.discovery",
-                  "credentials.use",
-                  "credentials.read",
-                  "library.read",
-                  "library.write",
-                  "library.delete",
-                  "player.read",
-                  "player.control",
-                  "playback.fallback.hold",
-                  "files.read",
-                  "files.write",
-                  "downloads.create",
-                  "clipboard.read",
-                  "clipboard.write",
-                  "notifications.system",
-                  "external.open",
-                  "background.run",
-                  "services.consume",
-                  "sharing.publish",
-                  "sharing.revoke",
-                  "guests.manage",
-                  "guests.run"
-                ]
-              },
-              "scope": {
-                "type": "object"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 4096
-              },
-              "optional": {
-                "type": "boolean"
-              },
-              "requiredFor": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096
-                },
-                "maxItems": 128,
-                "uniqueItems": true
-              }
-            },
-            "required": [
-              "key",
-              "name",
-              "reason"
-            ],
-            "additionalProperties": false
-          }
         },
         "guestPolicy": {
           "type": "object",
@@ -1182,7 +1685,7 @@
         "name",
         "version",
         "engines",
-        "modules"
+        "entry"
       ],
       "additionalProperties": false
     },
@@ -1272,8 +1775,7 @@
     }
   },
   "required": [
-    "manifest",
-    "entries"
+    "manifest"
   ],
   "additionalProperties": false
 }

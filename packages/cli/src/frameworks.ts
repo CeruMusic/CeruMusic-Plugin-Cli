@@ -3,7 +3,7 @@ import { dirname, resolve, relative, isAbsolute, sep, extname } from 'node:path'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { build, type Plugin } from 'esbuild'
-import { parse as parseSfc, compileScript, compileStyleAsync } from '@vue/compiler-sfc'
+import { parse as parseSfc, compileScript, compileStyleAsync, compileTemplate } from '@vue/compiler-sfc'
 import { transformAsync } from '@babel/core'
 import vueJsx from '@vue/babel-plugin-jsx'
 import { parse as parseHtml, serialize } from 'parse5'
@@ -35,11 +35,12 @@ function styleCode(css: string, id: string): string {
     ';document.head.append(s); }\n'
   )
 }
-async function cssBundle(css: string, directory: string): Promise<string> {
+async function cssBundle(css: string, directory: string, dependency?: () => void): Promise<string> {
   const result = await build({
     stdin: { contents: css, loader: 'css', resolveDir: directory },
     bundle: true,
     write: false,
+    metafile: !!dependency,
     outfile: 'style.css',
     loader: loaders,
     logLevel: 'silent',
@@ -57,15 +58,17 @@ async function cssBundle(css: string, directory: string): Promise<string> {
     ],
   })
   if (result.outputFiles.length !== 1) throw new Error('CSS emitted an external resource')
+  if (result.metafile && Object.keys(result.metafile.inputs).some(input => input !== '<stdin>')) dependency?.()
   return result.outputFiles[0].text
 }
 /** Side-effect stylesheet imports must survive single-file builds (React/Vue/vanilla). */
-export function stylesheetPlugin(): Plugin {
+export function stylesheetPlugin(styles?: Set<string>): Plugin {
   return {
     name: 'ceru-inline-stylesheets',
     setup(ctx) {
       ctx.onLoad({ filter: /\.css$/ }, async (args) => {
         const css = await cssBundle(await readFile(args.path, 'utf8'), dirname(args.path))
+        if (styles) { styles.add(css); return {contents:'export default '+JSON.stringify(css),loader:'js'} }
         const id = createHash('sha256').update(css).digest('hex').slice(0, 16)
         return {
           contents: 'export default ' + JSON.stringify(css) + ';' + styleCode(css, id),
@@ -76,16 +79,23 @@ export function stylesheetPlugin(): Plugin {
     },
   }
 }
-export function vuePlugin(root: string, framework?: string): Plugin {
+export function vuePlugin(root: string, framework?: string, styles?: Set<string>, track?: { dependency():void; source(file:string,text:string):void }): Plugin {
   return {
     name: 'ceru-vue',
     setup(ctx) {
+      ctx.onResolve({ filter: /^ceru:sfc-render$/, namespace: 'file' }, args => args.pluginData?.renderCode === undefined ? undefined : {
+        path: args.importer, namespace: 'ceru-sfc-render', pluginData: args.pluginData,
+      })
+      ctx.onLoad({ filter: /.*/, namespace: 'ceru-sfc-render' }, args => ({
+        contents: args.pluginData.renderCode, loader: 'ts', resolveDir: dirname(args.path),
+      }))
       ctx.onLoad({ filter: /\.vue$/ }, async (args) => {
         const original = await readFile(args.path, 'utf8')
+        track?.source(args.path, original)
         let parsed = parseSfc(original, { filename: args.path, sourceMap: true })
         if (parsed.errors.length) throw new Error(parsed.errors.map(String).join('\n'))
         if (!parsed.descriptor.script && !parsed.descriptor.scriptSetup)
-          parsed = parseSfc('<script>export default {}</script>\n' + original, {
+          parsed = parseSfc('<script setup>void 0</script>\n' + original, {
             filename: args.path,
           })
         const descriptor = parsed.descriptor
@@ -102,7 +112,22 @@ export function vuePlugin(root: string, framework?: string): Plugin {
           genDefaultAs: '__ceru_component',
         })
         let contents = compiled.content
+        let renderCode: string | undefined
+        if (descriptor.template && !descriptor.scriptSetup) {
+          const template = compileTemplate({
+            filename: args.path, id, source: descriptor.template.content,
+            scoped: descriptor.styles.some(style => style.scoped), slotted: descriptor.slotted,
+            preprocessLang: descriptor.template.lang,
+            preprocessCustomRequire: createRequire(resolve(root, 'package.json')),
+            compilerOptions: { bindingMetadata: compiled.bindings, isTS: ['ts','tsx'].includes(descriptor.script?.lang ?? '') },
+          })
+          if (template.errors.length) throw new Error(template.errors.map(String).join('\n'))
+          renderCode = template.code
+          contents += '\nimport {render as __ceru_template_render} from "ceru:sfc-render";\n__ceru_component.render = __ceru_template_render;\n'
+        }
+        if (compiled.deps?.length) track?.dependency()
         for (const style of descriptor.styles) {
+          if (style.lang && style.lang !== 'css') track?.dependency()
           const result = await compileStyleAsync({
             filename: args.path,
             source: style.content,
@@ -112,10 +137,9 @@ export function vuePlugin(root: string, framework?: string): Plugin {
             preprocessCustomRequire: createRequire(resolve(root, 'package.json')),
           })
           if (result.errors.length) throw new Error(result.errors.map(String).join('\n'))
-          contents += styleCode(
-            await cssBundle(result.code, dirname(args.path)),
-            id + String(descriptor.styles.indexOf(style)),
-          )
+          const css=await cssBundle(result.code,dirname(args.path),track?.dependency)
+          if (styles) styles.add(css)
+          else contents += styleCode(css,id + String(descriptor.styles.indexOf(style)))
         }
         if (descriptor.styles.some((s) => s.scoped))
           contents += '\n__ceru_component.__scopeId = ' + JSON.stringify('data-v-' + id) + ';'
@@ -126,6 +150,7 @@ export function vuePlugin(root: string, framework?: string): Plugin {
             Buffer.from(JSON.stringify(compiled.map)).toString('base64')
         return {
           contents,
+          pluginData: renderCode === undefined ? undefined : { renderCode },
           loader:
             descriptor.scriptSetup?.lang === 'tsx' || descriptor.script?.lang === 'tsx'
               ? 'tsx'

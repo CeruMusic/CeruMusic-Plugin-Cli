@@ -1,4 +1,27 @@
-import type { ContentEntity } from './index.js'
+import type { ContentEntity, SearchRequest } from './index.js'
+
+export function assertSearchRequest(value: unknown): asserts value is SearchRequest {
+  const request = value as Partial<SearchRequest> | null
+  if (
+    !request ||
+    typeof request.query !== 'string' ||
+    request.query.length > 4096 ||
+    !Array.isArray(request.kinds) ||
+    request.kinds.length > 32 ||
+    !request.kinds.every(
+      (kind) => typeof kind === 'string' && kind.length > 0 && kind.length <= 128,
+    ) ||
+    !request.filters ||
+    typeof request.filters !== 'object' ||
+    Array.isArray(request.filters) ||
+    (request.cursor !== undefined &&
+      (typeof request.cursor !== 'string' || request.cursor.length > 2048)) ||
+    !Number.isSafeInteger(request.limit) ||
+    request.limit! < 1 ||
+    request.limit! > 1000
+  )
+    throw new Error('Invalid music search request')
+}
 
 /**
  * Reject anything that is not a plain track list before a destructive call.
@@ -13,7 +36,6 @@ export function assertRemovableTracks(value: unknown): asserts value is ContentE
     const ref = (item as ContentEntity).ref
     if (!ref || typeof ref !== 'object' || ref.kind !== 'track')
       throw new Error('Only tracks can be removed')
-    if (typeof ref.id !== 'string' || !ref.id)
-      throw new Error('Invalid playlist removal item')
+    if (typeof ref.id !== 'string' || !ref.id) throw new Error('Invalid playlist removal item')
   }
 }

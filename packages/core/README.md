@@ -1,12 +1,12 @@
 # @shiqianjiang/ceru-plugin-core
 
-0.3.5 使用同一 `SurfaceSession` 管理 `playlistSections` 引用的 native 视图；Host 在现有歌单页挂载这些区块，并用 SDK 的 `assertNavigationRequest(request, callingPluginManifest)` 校验区块导航。
+`./contract` 定义 v3 RPC 方法、参数和权限；`./dispatch` 生成鉴权、超时、取消、去重和结果校验的分发器。`./host-library` 是宿主专用的歌单桥。
 
 0.3.3 的 `SurfaceSession` 支持原生视图校验，Web 沙箱提供 `ctx.close()`；账号贡献支持摘要及退出动作，弹框可声明 `presentation.kind: 'modal'`。
 
-Ceru Music v2 的 Host 无关 Core。它读取单文件 artifact，校验 manifest，接收插件注册的 Provider、Action 和歌单 Importer，并在结果返回应用前执行统一的数据契约校验。
+Ceru Music v3 的 Host 无关 Core。它读取单文件 artifact，校验 manifest，接收插件注册的 Provider、Action 和歌单 Importer，并在结果返回应用前执行统一的数据契约校验。
 
-Core 提供 `./node` 纯 Node worker 运行环境、`./electron` 可见页面沙箱、`./network` HTTP 代理和 `./sockets` 连接管理。后台逻辑不依赖 DOM；可见页面单独运行。播放器、歌单、账号和授权界面由澜音现有服务提供。
+Core 提供 `./node` 纯 Node worker 运行环境、`./surface-document` 隔离网页文档、`./network` HTTP 代理和 `./sockets` 连接管理。后台逻辑不依赖 DOM；可见页面单独运行。播放器、歌单、账号和授权界面由澜音现有服务提供。
 
 0.3.1 支持 SDK 的播放 `requestHeaders` 结果校验。桌面 Host 应将这些请求头按完整临时媒体 URL 隔离保存在主进程，并同时用于播放、缓存和下载请求。
 

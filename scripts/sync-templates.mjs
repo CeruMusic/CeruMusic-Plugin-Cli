@@ -1,4 +1,4 @@
-import { readdir, readFile, mkdir, writeFile, stat } from 'node:fs/promises'
+import { readdir, readFile, mkdir, writeFile, realpath, unlink } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 const source = resolve(process.argv[2] || '../CeruMusic-Plugin-Template/templates')
@@ -6,6 +6,7 @@ const destination = resolve('packages/cli/templates')
 const files = []
 async function scan(dir) {
   for (const item of await readdir(dir, { withFileTypes: true })) {
+    if (dir === source && item.name === 'snapshot.json') continue
     if (item.isSymbolicLink()) throw new Error('Template snapshots cannot contain symlinks')
     const path = join(dir, item.name)
     if (
@@ -29,6 +30,24 @@ for (const file of files) {
   const target = join(destination, file.path)
   await mkdir(resolve(target, '..'), { recursive: true })
   await writeFile(target, file.bytes)
+}
+const previous = JSON.parse(
+  await readFile(join(destination, 'snapshot.json'), 'utf8').catch((error) => {
+    if (error.code !== 'ENOENT') throw error
+    return '{"files":[]}'
+  }),
+)
+const keep = new Set(files.map((file) => file.path))
+for (const file of previous.files) {
+  if (keep.has(file) || file === 'snapshot.json') continue
+  if (!/^(?:[\w.-]+\/)+[\w.-]+$/.test(file) || file.split('/').includes('..'))
+    throw new Error('Invalid snapshot path: ' + file)
+  const target = resolve(destination, file)
+  const actual = await realpath(target).catch((error) => {
+    if (error.code !== 'ENOENT') throw error
+  })
+  if (actual && relative(await realpath(destination), actual).replaceAll('\\', '/') === file)
+    await unlink(target)
 }
 const manifest = {
   version: 1,

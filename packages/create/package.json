@@ -1,7 +1,7 @@
 {
   "name": "create-ceru-plugin",
-  "version": "0.3.15",
-  "description": "Create a TypeScript Ceru Music v2 plugin that builds to one JavaScript file",
+  "version": "3.0.0",
+  "description": "Create a Ceru Music v3 plugin in TypeScript or JavaScript",
   "type": "module",
   "bin": {
     "create-ceru-plugin": "dist/bin.js"
@@ -17,7 +17,7 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@shiqianjiang/ceru-plugin-cli": "0.3.15"
+    "@shiqianjiang/ceru-plugin-cli": "3.0.0"
   },
   "publishConfig": {
     "access": "public",

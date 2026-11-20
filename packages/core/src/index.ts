@@ -2,7 +2,6 @@ import {
   assertContentPage,
   assertLyricsDocument,
   assertResolveResult,
-  createHttpClient,
   type ContentEntity,
   type JsonObject,
   type JsonValue,
@@ -24,21 +23,18 @@ import {
   resolveArtifactConfig,
 } from '@shiqianjiang/ceru-plugin-issuer'
 
+export type RegistrationContext = Pick<
+  PluginContext,
+  | 'plugin'
+  | 'config'
+  | 'providers'
+  | 'actions'
+  | 'playlistImporters'
+  | 'lyricConverters'
+  | 'effects'
+>
 export interface CoreHostAdapter {
-  /** Real Host capabilities; absent services reject instead of pretending success. */
-  services?: Partial<PluginContext>
-  /** Execute the bundled logic entry in the Host sandbox. */
-  activate(artifact: Artifact, context: PluginContext): Promise<void | (() => unknown)>
-  /** Host-owned network broker. Playback URLs are returned directly. */
-  request?(request: {
-    url: string
-    method?: string
-    headers?: Record<string, string>
-    body?: string
-    timeoutMs?: number
-    operation: OperationContext
-  }): Promise<{ status: number; headers: Record<string, string>; body: JsonValue }>
-  onNotice?(notice: { type: string; data: JsonValue }): void
+  activate(artifact: Artifact, context: RegistrationContext): Promise<void | (() => unknown)>
 }
 
 export interface CoreOptions {
@@ -101,11 +97,11 @@ function methodAt(value: any, path: string): ((...args: any[]) => any) | undefin
 
 function declaration(
   manifest: PluginManifest,
-  group: 'providers' | 'commands' | 'playlistImporters',
+  group: 'providers' | 'actions' | 'importers',
   id: string,
 ) {
-  const values = manifest.contributes?.[group] ?? []
-  return values.find((item: any) => (group === 'commands' ? item.action === id : item.id === id))
+  const values = manifest.provides?.[group] ?? []
+  return values.find((item) => item.id === id)
 }
 
 function operationOrDefault(operation?: OperationContext): OperationContext {
@@ -119,7 +115,7 @@ function operationOrDefault(operation?: OperationContext): OperationContext {
 }
 
 /**
- * Host-neutral v2 Core. The Core owns protocol dispatch and validation; a Host
+ * Host-neutral v3 Core. The Core owns protocol dispatch and validation; a Host
  * owns sandbox execution and application services.
  */
 export class PluginCore {
@@ -170,40 +166,16 @@ export class PluginCore {
     return core
   }
 
-  context(): PluginContext {
-    const context: any = {
+  context(): RegistrationContext {
+    return {
       plugin: { id: this.manifest.id, version: this.manifest.version, manifest: this.manifest },
-      host: {
-        apiVersion: '2.0.0',
-        libraries: { lodash: 'host', icons: 'host', assets: 'host' },
-        mode: 'production',
-      },
-      modules: {
-        require: (name: string) => {
-          throw new Error(`Host module ${name} must be supplied by the Host`)
-        },
-      },
-      utils: { lodash: {} },
-      icons: {
-        list: () => [],
-        url: async () => {
-          throw new Error('Icon service is not connected')
-        },
-      },
-      assets: {
-        list: () => [],
-        url: async () => {
-          throw new Error('Asset service is not connected')
-        },
-      },
       config: { get: async <T = JsonObject>() => this.config as Readonly<T> },
       providers: {
         register: (id: string, implementation: ProviderImplementation) =>
           this.registerProvider(id, implementation),
       },
       actions: {
-        register: (id: string, handler: ActionRegistration['handler']) =>
-          this.registerAction(id, handler),
+        register: (id, handler) => this.registerAction(id, handler),
       },
       playlistImporters: {
         register: (id: string, implementation: ImporterRegistration['implementation']) =>
@@ -211,10 +183,12 @@ export class PluginCore {
       },
       lyricConverters: {
         register: (id: string, implementation: LyricConverter) => {
-          if (!this.manifest.contributes?.lyricConverters?.some((item) => item.id === id))
+          if (!this.manifest.provides?.lyricConverters?.some((item) => item.id === id))
             throw new Error('Undeclared lyric converter')
           this.converters.set(id, implementation)
-          return () => this.converters.delete(id)
+          return () => {
+            this.converters.delete(id)
+          }
         },
       },
       effects: {
@@ -222,79 +196,7 @@ export class PluginCore {
           this.disposers.push(dispose)
         },
       },
-      http: {
-        request: (request: any) => this.request(request),
-        create: (defaults: any = {}) => ({
-          request: (url: string, input: any = {}) =>
-            this.request({ ...input, ...defaults, url: new URL(url, defaults.baseURL).href }),
-        }),
-      },
-      permissions: {
-        getGranted: async () => [],
-        query: async () => ({ status: 'prompt' }),
-        request: async () => ({ status: 'prompt' }),
-        requestGroup: async () => ({ status: 'prompt', grants: [] }),
-      },
-      playback: { failure: (error: any): ResolveResult => ({ ok: false, error }) },
-      ui: {
-        toast: async (message: any) =>
-          this.options.host.onNotice?.({ type: 'toast', data: message }),
-        notify: async (message: any) =>
-          this.options.host.onNotice?.({ type: 'notify', data: message }),
-      },
-      log: {
-        debug: () => undefined,
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
     }
-    const services = this.options.host.services ?? {}
-    for (const [key, value] of Object.entries(services)) {
-      if (
-        [
-          'plugin',
-          'providers',
-          'actions',
-          'playlistImporters',
-          'lyricConverters',
-          'effects',
-        ].includes(key)
-      )
-        throw new Error('Host cannot override Core registry: ' + key)
-      context[key] = value
-    }
-    for (const name of [
-      'library',
-      'account',
-      'player',
-      'queue',
-      'downloads',
-      'files',
-      'clipboard',
-      'settings',
-      'window',
-      'sharing',
-      'rooms',
-      'ai',
-      'tasks',
-      'sockets',
-      'events',
-      'guests',
-      'storage',
-    ]) {
-      if (!context[name])
-        context[name] = new Proxy(
-          {},
-          {
-            get: () => {
-              throw new Error('Host service is not connected: ' + name)
-            },
-          },
-        )
-    }
-    if (!services.http) context.http.create = (defaults: any) => createHttpClient(context, defaults)
-    return context as PluginContext
   }
 
   private registerProvider(id: string, implementation: ProviderImplementation): () => void {
@@ -306,12 +208,18 @@ export class PluginCore {
     return () => this.providers.delete(id)
   }
 
-  private registerAction(id: string, handler: ActionRegistration['handler']): () => void {
-    if (!declaration(this.manifest, 'commands', id))
+  private registerAction<TInput extends JsonValue>(
+    id: string,
+    handler: (
+      input: TInput,
+      operation: OperationContext,
+    ) => ReturnType<ActionRegistration['handler']>,
+  ): () => void {
+    if (!declaration(this.manifest, 'actions', id))
       throw new Error(`Action ${id} is not declared in manifest`)
     if (!this.actions.has(id) && this.actions.size >= this.options.maxActions)
       throw new Error('Action limit exceeded')
-    this.actions.set(id, handler)
+    this.actions.set(id, (input, operation) => handler(input as TInput, operation))
     return () => this.actions.delete(id)
   }
 
@@ -319,24 +227,12 @@ export class PluginCore {
     id: string,
     implementation: ImporterRegistration['implementation'],
   ): () => void {
-    if (!declaration(this.manifest, 'playlistImporters', id))
+    if (!declaration(this.manifest, 'importers', id))
       throw new Error(`Playlist importer ${id} is not declared in manifest`)
     if (!this.importers.has(id) && this.importers.size >= this.options.maxImporters)
       throw new Error('Importer limit exceeded')
     this.importers.set(id, implementation)
     return () => this.importers.delete(id)
-  }
-
-  private async request(input: any): Promise<any> {
-    if (!this.options.host.request) throw new Error('Host HTTP service is not connected')
-    const declaration = this.manifest.permissions?.find(
-      (item) => item.key === input.permissionKey && item.name === 'network.request',
-    )
-    if (!declaration) throw new Error('Network permission is not declared')
-    const permissions = this.options.host.services?.permissions
-    if (!permissions || (await permissions.query({ key: declaration.key })).status !== 'granted')
-      throw new Error('Network permission is not granted')
-    return this.options.host.request({ ...input, operation: operationOrDefault(input.operation) })
   }
 
   async invokeProvider(
@@ -375,8 +271,8 @@ export class PluginCore {
     op.signal.throwIfAborted()
     const result = await fn(...input, op)
     op.signal.throwIfAborted()
-    if (method === 'tracks.resolve' || method === 'resolve') assertResolveResult(result)
-    else if (method === 'tracks.lyrics' || method === 'lyrics') assertLyricsDocument(result)
+    if (method === 'tracks.resolve') assertResolveResult(result)
+    else if (method === 'tracks.lyrics') assertLyricsDocument(result)
     else if (
       [
         'tracks.search',

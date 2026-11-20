@@ -1,4 +1,4 @@
-import type { JsonValue, PluginManifest, SurfaceDeclaration } from '@shiqianjiang/ceru-plugin-sdk'
+import type { JsonValue, PluginManifest, ViewDeclaration } from '@shiqianjiang/ceru-plugin-sdk'
 import { assertNativeView } from '@shiqianjiang/ceru-plugin-sdk'
 
 /** Shared by preview and production hosts; no platform or login-specific behavior. */
@@ -11,7 +11,7 @@ export class SurfaceSession {
   private actions: Set<string>
 
   constructor(
-    readonly surface: SurfaceDeclaration,
+    readonly surface: ViewDeclaration,
     manifest: PluginManifest,
     private readonly dispatch: (
       action: string,
@@ -19,9 +19,9 @@ export class SurfaceSession {
       signal?: AbortSignal,
     ) => Promise<unknown>,
   ) {
-    this.actions = new Set(manifest.contributes?.commands?.map((command) => command.action))
-    if (surface.kind === 'native' && !this.actions.has(surface.entry))
-      throw new Error('Missing native render action: ' + surface.entry)
+    this.actions = new Set(manifest.provides?.actions?.map((command) => command.id))
+    if (surface.kind === 'native' && !this.actions.has(surface.module))
+      throw new Error('Missing native render action: ' + surface.module)
     for (const action of Object.values(surface.lifecycle ?? {}))
       if (!this.actions.has(action)) throw new Error('Unknown surface lifecycle action: ' + action)
   }
@@ -48,7 +48,7 @@ export class SurfaceSession {
     try {
       const result = await this.dispatch(action, input, controller.signal)
       if (this.closed) throw new Error('Surface is closed')
-      if (this.surface.kind === 'native' && action === this.surface.entry)
+      if (this.surface.kind === 'native' && action === this.surface.module)
         assertNativeView(result, this.actions)
       return result
     } finally {

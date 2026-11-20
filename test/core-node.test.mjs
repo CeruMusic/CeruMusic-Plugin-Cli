@@ -7,15 +7,15 @@ import { createServer } from 'node:http'
 import { requestNetwork } from '../packages/core/dist/network.js'
 
 const manifest = {
-  manifestVersion: 2,
+  manifestVersion: 3,
   id: 'test.core-node',
   name: 'Core test',
   version: '1.0.0',
-  engines: { hostApi: '^2.0.0', logicRuntime: 'ceru-js@1' },
-  modules: { logic: { entry: 'logic.main' } },
-  contributes: {
+  engines: { hostApi: '^3.0.0', logicRuntime: 'ceru-js@1' },
+  entry: { logic: { module: 'logic.main' } },
+  provides: {
     providers: [{ id: 'test', name: 'test', protocols: ['music.list@1'] }],
-    commands: [{ id: 'environment', title: 'Environment', action: 'environment' }],
+    actions: [{ id: 'environment', title: 'Environment' }],
   },
 }
 const artifact =

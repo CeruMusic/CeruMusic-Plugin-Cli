@@ -1,0 +1,186 @@
+.ceru-hc-header,
+.ceru-hc-state,
+.ceru-hc-library,
+.ceru-hc-grid,
+.ceru-hc-card {
+  color: var(--td-text-color-primary, CanvasText);
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+.ceru-hc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ceru-hc-header h2 {
+  margin: 0;
+  font-size: clamp(18px, 3vw, 24px);
+  line-height: 1.35;
+}
+.ceru-hc-header p,
+.ceru-hc-state p {
+  margin: 4px 0 0;
+  color: var(--td-text-color-secondary, GrayText);
+}
+.ceru-hc-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  text-align: center;
+  min-height: 88px;
+  padding: 12px;
+}
+.ceru-hc-spinner {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--td-component-stroke, GrayText);
+  border-top-color: var(--td-brand-color, Highlight);
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ceru-hc-spinner {
+    animation: ceru-hc-rotate 0.8s linear infinite;
+  }
+}
+@keyframes ceru-hc-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ceru-hc-library ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ceru-hc-library li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--td-component-stroke, #ddd);
+}
+.ceru-hc-copy {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ceru-hc-copy small {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--td-text-color-secondary, GrayText);
+  font-size: 12px;
+}
+.ceru-hc-library button,
+.ceru-hc-title,
+.ceru-hc-menu summary {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ceru-hc-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: start;
+  font-weight: 600;
+  justify-self: start;
+  overflow-wrap: anywhere;
+}
+.ceru-hc-title:hover {
+  color: var(--td-brand-color, Highlight);
+}
+.ceru-hc-library button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ceru-hc-library :is(button, summary):focus-visible,
+.ceru-hc-card button:focus-visible {
+  outline: 2px solid var(--td-brand-color, Highlight);
+  outline-offset: 2px;
+}
+.ceru-hc-duration {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--td-text-color-secondary, GrayText);
+}
+.ceru-hc-quality {
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--td-brand-color, Highlight);
+  font:
+    600 11px/16px system-ui,
+    sans-serif;
+}
+.ceru-hc-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex: none;
+}
+.ceru-hc-source {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+.ceru-hc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 155px), 1fr));
+  gap: 12px;
+}
+.ceru-hc-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--td-component-stroke, #ddd);
+  border-radius: 8px;
+  min-width: 0;
+}
+.ceru-hc-cover {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  background: var(--td-bg-color-secondarycontainer, #eee);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.ceru-hc-cover img:not(.ceru-hc-icon) {
+  max-width: 100%;
+  height: auto;
+}
+.ceru-hc-menu summary,
+.ceru-hc-menu button {
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.ceru-hc-menu button {
+  display: block;
+  border: 0;
+  background: transparent;
+  text-align: start;
+  width: 100%;
+}
+.ceru-hc-menu button:hover,
+.ceru-hc-menu summary:hover {
+  background: var(--td-bg-color-secondarycontainer, #eee);
+}
+.ceru-hc-library [role='alert'] {
+  color: var(--td-error-color, FireBrick);
+}
+.ceru-hc-background { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: var(--ceru-hc-background); background-position: center; background-size: cover; isolation: isolate; }
+.ceru-hc-background::before { content: ''; position: absolute; inset: -12%; z-index: -1; background: inherit; filter: blur(34px) saturate(1.2); transform: scale(1.08); opacity: .8; }
+.ceru-hc-background::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgb(0 0 0 / 35%), transparent 54%, var(--ceru-hc-accent)); mix-blend-mode: screen; opacity: .3; pointer-events: none; }
+.ceru-hc-background canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }

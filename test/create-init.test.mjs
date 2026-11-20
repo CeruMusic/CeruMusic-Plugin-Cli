@@ -1,16 +1,39 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { printInitSummary, promptInit } from '../packages/cli/dist/init.js'
+import { loadProject, scaffoldProject } from '../packages/cli/dist/project.js'
 import { PromptCancelled, promptSelect, promptText } from '../packages/cli/dist/tui.js'
 
 const workspace = fileURLToPath(new URL('..', import.meta.url))
 const cli = resolve(workspace, 'packages/cli/dist/bin.js')
+
+test('scaffolding preserves readable names and gives lossy directory names distinct valid IDs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ceru-identity-'))
+  const create = async (parent, name) => {
+    const path = await scaffoldProject(join(root,parent,name), {template:'page-extension',language:'js'})
+    const {config:{manifest}} = await loadProject(path)
+    const pkg = JSON.parse(await readFile(join(path,'package.json'),'utf8'))
+    assert.equal(manifest.id,'local.' + pkg.name)
+    return manifest
+  }
+  try {
+    const first = await create('first','黑胶歌词'), second = await create('first','桌面歌词')
+    assert.notEqual(first.id,second.id)
+    assert.equal(first.name,'黑胶歌词')
+    assert.equal(first.id,(await create('other','黑胶歌词')).id)
+    assert.equal((await create('first','player-skin')).id,'local.player-skin')
+    assert.notEqual((await create('first','player 中文')).id,(await create('first','player 歌词')).id)
+    assert.ok((await create('first','a'.repeat(125))).id.length <= 128)
+  } finally {
+    await rm(root,{recursive:true,force:true})
+  }
+})
 
 // 模拟交互终端：isTTY 为真但不进入真实原始模式，按键用文本序列注入。
 function fakeTerminal() {

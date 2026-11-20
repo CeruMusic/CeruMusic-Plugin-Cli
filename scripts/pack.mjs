@@ -18,7 +18,15 @@ for (const name of ['sdk', 'issuer', 'core', 'cli', 'create']) {
   )
   if (result.status !== 0) throw new Error(result.stderr || result.stdout)
   const [summary] = JSON.parse(result.stdout)
+  if (name === 'core') {
+    const bundle = await readFile(resolve('packages/core/assets/component-view.js'), 'utf8')
+    if (/lyric-scroll-container|--yrc-mask-x|yrc-word|visualizer-canvas|label-shine|ceru-hc-vinyl-disc/.test(bundle)) throw Error('Desktop player implementation in Core runtime')
+    if (summary.files.some(file => /(?:^|\/)(?:LyricAdapter\.vue|lyric-adapter\.(?:js|css|d\.ts))$/.test(file.path))) throw Error('Desktop lyric assets in Core package')
+  }
   for (const file of summary.files) {
+    if (name === 'cli' && /^assets\/(?:electron(?:-app\/|\.cjs$)|(?:playground|native-view|core-contracts|sandbox)\.js$|index\.html$|style\.css$)/.test(file.path)) {
+      throw new Error('Obsolete preview asset in v3 CLI: ' + file.path)
+    }
     if (/private\.pem$|(^|\/)\.env$|(^|\/)\.npmrc$|node_modules\//.test(file.path)) {
       throw new Error('Sensitive/unexpected package file: ' + file.path)
     }

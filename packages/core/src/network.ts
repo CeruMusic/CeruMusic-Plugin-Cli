@@ -3,6 +3,7 @@ import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import type { MediaUpstream } from './media-stream.js'
 
 export function isPrivateAddress(address: string): boolean {
   const value = address.toLowerCase()
@@ -91,8 +92,10 @@ export async function requestNetwork(
       signal,
     })
     if ([301, 302, 303, 307, 308].includes(response.status) && response.headers.location) {
+      if (input.rejectRedirects) throw Error('此请求不允许重定向')
       if (redirects >= 5) throw new Error('重定向次数过多')
       const next = new URL(response.headers.location, url)
+      if (input.credential && next.origin !== url.origin) throw Error('账号请求不能跨来源重定向')
       if (next.origin !== url.origin)
         for (const name of Object.keys(headers))
           if (/authorization|cookie|token|key/i.test(name)) delete headers[name]
@@ -122,10 +125,17 @@ export async function requestNetwork(
       status: response.status,
       headers: Object.fromEntries(
         Object.entries(response.headers)
-          .filter(([, v]) => v != null)
+          .filter(
+            ([key, value]) =>
+              value != null &&
+              !(input.credential && /^(set-cookie2?|authorization|proxy-authenticate)$/i.test(key)),
+          )
           .map(([k, v]) => [k, String(v)]),
       ),
       body,
+      // 跟随重定向后的最终地址。插件侧（如 QQ 音乐短链）需要它来还原真实目标，
+      // 因为重定向是由 core 内部跟随的，Location 头不会留给调用方。
+      url: url.href,
     }
   } catch (error) {
     if (axios.isAxiosError(error))
@@ -136,5 +146,110 @@ export async function requestNetwork(
       httpAgent.destroy()
       httpsAgent.destroy()
     }
+  }
+}
+
+/** Host-only binary transport; unlike requestNetwork this never buffers or decodes the body. */
+export async function requestNetworkStream(
+  input: { url: string; headers?: Record<string, string> },
+  privateAllowed: (url: URL) => boolean,
+  signal: AbortSignal,
+  redirects = 0,
+): Promise<MediaUpstream> {
+  signal.throwIfAborted()
+  const url = new URL(input.url)
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+    throw Error('Invalid media URL')
+  const hostname = url.hostname.replace(/^\[|\]$/g, '')
+  const addresses = isIP(hostname)
+    ? [{ address: hostname, family: isIP(hostname) }]
+    : await lookup(hostname, { all: true })
+  signal.throwIfAborted()
+  if (
+    !addresses.length ||
+    (addresses.some((item) => isPrivateAddress(item.address)) && !privateAllowed(url))
+  )
+    throw Error('Media address is not an owned plugin service')
+  const chosen = addresses[0]
+  const pin = ((_hostname: string, options: any, callback: any) =>
+    options?.all ? callback(null, [chosen]) : callback(null, chosen.address, chosen.family)) as any
+  const headers: Record<string, string> = {}
+  for (const [name, value] of Object.entries(input.headers ?? {})) {
+    if (
+      /^(host|connection|content-length|transfer-encoding|proxy-.*|upgrade|accept-encoding)$/i.test(
+        name,
+      )
+    )
+      continue
+    if (
+      !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) ||
+      typeof value !== 'string' ||
+      /[\r\n]/.test(value)
+    )
+      throw Error('Invalid media header')
+    headers[name] = value
+  }
+  headers['Accept-Encoding'] = 'identity'
+  // Owned loopback services must remain direct even when the user configures a proxy.
+  const proxy = addresses.some((item) => isPrivateAddress(item.address))
+    ? null
+    : (networkProxyResolver?.(url.href) ?? null)
+  const httpAgent = proxy?.httpAgent ?? new HttpAgent({ lookup: pin }),
+    httpsAgent = proxy?.httpsAgent ?? new HttpsAgent({ lookup: pin })
+  const release = () => {
+    if (!proxy) {
+      httpAgent.destroy()
+      httpsAgent.destroy()
+    }
+  }
+  try {
+    const result = await axios.request({
+      url: url.href,
+      method: 'GET',
+      headers,
+      responseType: 'stream',
+      decompress: false,
+      httpAgent,
+      httpsAgent,
+      proxy: false,
+      maxRedirects: 0,
+      timeout: 30000,
+      validateStatus: () => true,
+      signal,
+    })
+    if ([301, 302, 303, 307, 308].includes(result.status) && result.headers.location) {
+      result.data.destroy()
+      release()
+      if (redirects >= 5) throw Error('Too many media redirects')
+      const next = new URL(String(result.headers.location), url)
+      if (next.origin !== url.origin)
+        for (const name of Object.keys(headers))
+          if (/authorization|cookie|token|key/i.test(name)) delete headers[name]
+      return requestNetworkStream(
+        { url: next.href, headers },
+        privateAllowed,
+        signal,
+        redirects + 1,
+      )
+    }
+    if (result.headers['content-encoding'] && result.headers['content-encoding'] !== 'identity') {
+      result.data.destroy()
+      throw Error('Compressed encrypted media is not supported')
+    }
+    result.data.once('close', release)
+    return {
+      status: result.status,
+      headers: Object.fromEntries(
+        Object.entries(result.headers)
+          .filter(([, value]) => value != null)
+          .map(([name, value]) => [name, String(value)]),
+      ),
+      body: result.data,
+    }
+  } catch (error) {
+    release()
+    if (axios.isAxiosError(error))
+      throw Error('Media request failed: ' + (error.code ?? 'NETWORK_ERROR'))
+    throw error
   }
 }

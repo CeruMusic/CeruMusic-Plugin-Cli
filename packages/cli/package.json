@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-cli",
-  "version": "0.3.15",
+  "version": "3.0.0",
   "description": "TypeScript scaffolding, single-file build, watch, validation, signing and issuance for Ceru plugins",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,10 @@
   },
   "files": [
     "dist",
-    "assets",
+    "assets/catalog.json",
+    "assets/compatibility.json",
+    "assets/originals",
+    "assets/vendor-licenses",
     "schemas",
     "templates",
     "README.md",
@@ -32,8 +35,10 @@
   },
   "dependencies": {
     "@babel/core": "^7.29.7",
-    "@shiqianjiang/ceru-plugin-issuer": "0.3.15",
-    "@shiqianjiang/ceru-plugin-sdk": "0.3.15",
+    "@shiqianjiang/ceru-plugin-issuer": "3.0.0",
+    "@shiqianjiang/ceru-plugin-sdk": "3.0.0",
+    "@volar/typescript": "2.4.28",
+    "@vue/language-core": "3.3.11",
     "@vue/babel-plugin-jsx": "^2.0.1",
     "@vue/compiler-sfc": "3.5.43",
     "axios": "^1.20.0",
@@ -43,11 +48,10 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "semver": "^7.7.0",
-    "socket.io-client": "^4.8.3",
     "typescript": "~5.9.3",
     "vue": "3.5.43",
     "vue-tsc": "^3.3.11",
-    "ws": "^8.21.3"
+    "@shiqianjiang/ceru-plugin-core": "3.0.0"
   },
   "publishConfig": {
     "access": "public",

@@ -1,5 +1,7 @@
 # 原生列表与插件自定义页面
 
+新写的 v3 插件建议使用 `component` 视图（见 `COMPONENT-VIEWS.md`）。以下保留 v2 原生界面文档，已安装插件无需为此改写。
+
 本教程对应 SDK、Core、Issuer、CLI 和 create-ceru-plugin **0.3.5**，包含原生 Surface、现有歌单页区块、账号摘要／退出菜单及登录弹框自动关闭接口。
 
 插件可以同时声明 `native`、`web` 和 `schema` 三种 Surface。推荐歌单、音乐库和歌曲列表适合 `native`：插件在逻辑沙箱中运行 render 回调，返回标准数据；澜音用自己的歌单卡片、列表和按钮渲染，沿用主题、导航和播放器。账号表单、二维码等自定义交互可以继续使用插件打包的 Vue/React 页面。

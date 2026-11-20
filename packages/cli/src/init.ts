@@ -68,7 +68,7 @@ export function printInitSummary(output: TuiOutput, path: string, interactive: b
         path +
         '\n\nNext:\n  cd ' +
         JSON.stringify(path) +
-        '\n  npm install\n  npm run build\n\nShare only dist/plugin.js. A v2-compatible Host is required.\n',
+        '\n  npm install\n  npm run dev    # watch; add dist/plugin.js in desktop developer mode\n\nFor distribution, stop the watcher, then run npm run build and npm run validate. Share only dist/plugin.js. A v3-compatible Host is required.\n',
     )
     return
   }
@@ -76,7 +76,7 @@ export function printInitSummary(output: TuiOutput, path: string, interactive: b
   const steps: Array<[string, string]> = [
     ['cd ' + JSON.stringify(path), ''],
     ['npm install', '安装模板依赖'],
-    ['npm run dev', '启动 Electron 调试工作台'],
+    ['npm run dev', '监听构建，在澜音开发者模式添加产物'],
     ['npm run build', '产出 dist/plugin.js'],
   ]
   const width = Math.max(...steps.map(([command]) => command.length))
@@ -88,5 +88,5 @@ export function printInitSummary(output: TuiOutput, path: string, interactive: b
     output.write(
       '    ' + style.accent(command.padEnd(width)) + (note ? '  ' + style.dim(note) : '') + '\n',
     )
-  output.write('\n  ' + style.dim('只分发 dist/plugin.js；安装需要 v2 兼容的澜音 Host。') + '\n\n')
+  output.write('\n  ' + style.dim('只分发 dist/plugin.js；安装需要 v3 兼容的澜音 Host。') + '\n\n')
 }

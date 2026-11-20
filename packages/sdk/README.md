@@ -1,12 +1,12 @@
 # Ceru Plugin SDK
 
-0.3.5 新增 `contributes.playlistSections`、`HostNavigationRequest` 和 `assertNavigationRequest`。插件通过 `ui.navigation.open({ page: 'playlist', sectionId })` 前往 Host 现有歌单页的原生区块，校验以调用插件的 manifest 为准。
+v3 只接受 `manifestVersion: 3`，使用 `entry/provides/uses/ui` 分组。Host 注册与数据类型由 SDK 描述；Host 自身的歌单委托实现位于 Core。
 
 ## 原生 UI 与账号菜单
 
-本节接口由 0.3.3 完整提供。
+v3 原生视图使用 `entry.views` 和 `provides.actions`。
 
-从根入口导入 `defineNativeView`、`NativeView`、`assertNativeView` 和 `AccountSummary`。`kind: 'native'` 的 Surface 以声明的 action 为 render 入口，返回网格／列表与标准内容数据，由 Host 的原生组件渲染。`contributes.accountItems` 以公开摘要动作和账号 Surface 接入 Host 账号菜单；账号业务、凭据和 Vue 登录页面保留在插件内。
+从根入口导入 `defineNativeView`、`NativeView`、`assertNativeView` 和 `AccountSummary`。`kind: 'native'` 的 Surface 以声明的 action 为 render 入口，返回网格／列表与标准内容数据，由 Host 的原生组件渲染。旧的 `accountItems` 摘要动作不能直接变成 `provides.accounts` 的登录实现。
 
 [原生 Surface、导航、播放与账号贡献教程](https://github.com/CeruMusic/CeruMusic-Plugin-Cli/blob/main/docs/NATIVE-SURFACES.md)。脚手架 `connected-library` 的 JS/TS 示例可直接构建和预览。
 
@@ -37,7 +37,7 @@ Manifest 的分享入口和 Guest 展示字段还需要匹配的构建器与校�
 `npm pack` 会先编译 SDK、复制必要的 ambient 声明，并检查每个 exports 目标存在。
 仓库的 `npm run test:sdk-package` 将真实 tarball 安装到空项目中，验证根入口、子路径和类型约束。
 
-面向 Ceru Music v2 的 TypeScript 类型与小型作者辅助函数。
+面向 Ceru Music v3 的 TypeScript 类型与小型作者辅助函数。
 
 包含 PluginContext、分组 Provider、歌曲/歌词/歌单标准数据、宿主服务、权限组、Surface、资源引用、结构化错误、UI Slot、图标名和类型化 Lodash。运行能力由 Host 提供，SDK 本身不授予权限。
 
@@ -63,3 +63,13 @@ CLI 并非必需。插件也可以直接写成 `exports.manifest`、`exports.act
 运行配置通过 `await ctx.config.get<PluginConfig>()` 读取。配置默认值来自静态 `exports.manifest.config`，个性化发行值来自签名后的 `personalization.config`；Host 递归合并后再交给插件。`definePluginConfig()` 可为外部 TS/JS 配置保留完整字段提示。
 
 [完整指南与示例](https://github.com/CeruMusic/CeruMusic-Plugin-Cli#readme)
+
+## v3 插件间服务
+
+提供方在 `provides.services` 声明 `{id: 'echo', version: '1.2.0', methods: ['reply']}`，启用时注册处理函数：
+
+```js
+ctx.services.register('echo', { reply: (input, { callerPluginId }) => ({ input, callerPluginId }) })
+```
+
+调用方在 `uses.permissions` 声明 `services.consume`，在 `uses.plugins` 声明 `{pluginId: 'example.provider', service: 'echo', version: '^1.0.0'}`。使用 `const echo = await ctx.plugins.use('example.provider', 'echo')`，再 `await echo.reply({text:'你好'})`。指定 `optional: true` 时须处理 `null`，可用 `ctx.plugins.on('available', handler)` 与 `unavailable` 监听变化。硬依赖不满足时应用保留启用意愿；提供方恢复后自动启动，用户手动停用的插件不会被重新打开。版本按服务自身的 semver 匹配，不是插件包版本。处理函数不能嵌套服务调用。

@@ -1,5 +1,7 @@
 # Ceru Music 插件系统 v2 设计方案
 
+> 本文为 v2 历史方案。v3 实现以任务书 `docs/plugin-environment-refactor.md` 和 [v3 清单指南](MANIFEST-V3.md) 为准；本地验收见 [v3-local-qa.md](v3-local-qa.md)。
+
 > 状态：生产接入中的设计文档。当前实现边界见 [运行契约](./runtime-contract.md)；本提案中 Guest、多账号及部分应用服务仍待接入，不能把接口声明视为已实现能力。
 > 当前工具链支持编译后单 JS，也可选用 .jsx 文件名；Vue/React 生产运行代码编入插件，宿主不提供框架。<br>
 > 日期：2026-09-19。<br>

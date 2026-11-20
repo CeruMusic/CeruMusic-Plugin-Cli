@@ -1,4 +1,5 @@
 import type { ContentEntity, ResourceRef, ResolveResult } from './index.js'
+import { assertStreamSpec } from './streams.js'
 
 /** Milliseconds throughout. Platform-specific formats/decryption stay inside the plugin. */
 export interface LyricWord {
@@ -238,6 +239,7 @@ export function assertResolveResult(value: unknown): asserts value is ResolveRes
           throw new Error('Invalid playback request header')
       }
     }
+    if (value.stream !== undefined) assertStreamSpec(value.stream)
     return
   }
   if (!record(value.error) || !text(value.error.code, 128) || !text(value.error.message, 65536))

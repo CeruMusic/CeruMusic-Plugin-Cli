@@ -10,12 +10,14 @@ import {
 } from 'node:fs/promises'
 import { dirname, resolve, relative, isAbsolute, sep, extname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { build } from 'esbuild'
 import ts from 'typescript'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { isBuiltin } from 'node:module'
 import { stylesheetPlugin, vuePlugin, webDistEntry } from './frameworks.js'
+import {buildComponent, type WatchComponentCache} from './component.js'
 import { hostModulesPlugin, assertBundledDependencies } from './dependencies.js'
 import {
   canonical,
@@ -124,8 +126,7 @@ function configType(value: JsonValue, depth = 0): string {
     return 'readonly (' + (members.join(' | ') || 'JsonValue') + ')[]'
   }
   const fields = Object.entries(value).map(
-    ([key, child]) =>
-      'readonly ' + JSON.stringify(key) + ': ' + configType(child, depth + 1) + ';',
+    ([key, child]) => 'readonly ' + JSON.stringify(key) + ': ' + configType(child, depth + 1) + ';',
   )
   return '{ ' + fields.join(' ') + ' }'
 }
@@ -145,9 +146,7 @@ async function writeConfigTypes(root: string, config: JsonObject): Promise<strin
 
 function entryFunctionName(id: string, suffix: 'Logic' | 'Surface' | 'Module'): string {
   const words = id.split(/[^a-zA-Z0-9]+/).filter(Boolean)
-  const name = words
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join('')
+  const name = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join('')
   const base = name || 'Plugin'
   const safe = /^[A-Za-z_$]/.test(base) ? base : 'Plugin' + base
   return safe.startsWith(suffix) || safe.endsWith(suffix) ? safe : safe + suffix
@@ -184,6 +183,39 @@ async function inside(root: string, path: string): Promise<string> {
     throw new Error('Input escapes project root: ' + path)
   return target
 }
+function resolveAuthorEntries(raw: Record<string, any>) {
+  if (!raw.manifest?.entry || raw.manifest.manifestVersion !== 3) return
+  raw.entries ??= {}
+  if (!raw.entries || typeof raw.entries !== 'object' || Array.isArray(raw.entries))
+    throw new Error('entries must be an object')
+  const mapModule = (declaration: any, fallback: string) => {
+    const file = declaration?.module
+    if (
+      typeof file !== 'string' ||
+      Object.hasOwn(raw.entries, file) ||
+      Object.hasOwn(raw.webDist ?? {}, file)
+    )
+      return
+    if (!/\.(?:[cm]?[jt]sx?|vue)$/.test(file)) return
+    const existing = Object.keys(raw.entries).find((key) => raw.entries[key] === file)
+    if (existing) {
+      declaration.module = existing
+      return
+    }
+    if (Object.hasOwn(raw.entries, fallback) || Object.hasOwn(raw.webDist ?? {}, fallback))
+      throw new Error('Conflicting module id: ' + fallback)
+    raw.entries[fallback] = file
+    declaration.module = fallback
+  }
+  const entry = raw.manifest.entry
+  mapModule(entry.logic, 'logic.main')
+  mapModule(entry.share, 'share.main')
+  mapModule(entry.server, 'server.main')
+  if (Array.isArray(entry.views))
+    for (const view of entry.views)
+      if (view?.kind === 'web' || view?.kind === 'component') mapModule(view, 'view.' + view.id)
+}
+
 export async function loadProject(project: string): Promise<{ root: string; config: BuildConfig }> {
   const root = await realpath(resolve(project))
   const source = parseJsonStrict(await readFile(resolve(root, 'ceru.plugin.json'), 'utf8'))
@@ -215,6 +247,7 @@ export async function loadProject(project: string): Promise<{ root: string; conf
   if (raw.config !== undefined) raw.manifest.config = raw.config
   if (raw.framework && !['vanilla', 'vue', 'react'].includes(raw.framework))
     throw new Error('Unsupported framework')
+  resolveAuthorEntries(raw)
   validateManifest(raw.manifest)
   if (!raw.entries || typeof raw.entries !== 'object' || Array.isArray(raw.entries))
     throw new Error('entries must map module IDs to source paths')
@@ -246,12 +279,9 @@ function checkTypes(root: string, extraFiles: string[] = []): ts.Program {
   }
   return program
 }
-export async function buildProject(
-  project = '.',
-  options: { out?: string; overwrite?: boolean; development?: boolean } = {},
-): Promise<{ path: string; bytes: number; devModules: Record<string, string> }> {
-  const { root, config } = await loadProject(project)
-  if (config.framework === 'vue') {
+async function projectProgram(root:string,config:BuildConfig,watchVueTypes?:(root:string,declarations:string)=>ts.Program):Promise<ts.Program> {
+  const configTypes=await writeConfigTypes(root,config.config??{})
+  if (config.framework === 'vue' && !watchVueTypes) {
     const executable = createRequire(import.meta.url).resolve('vue-tsc/bin/vue-tsc.js')
     const result = spawnSync(
       process.execPath,
@@ -260,8 +290,21 @@ export async function buildProject(
     )
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
-  const configTypes = await writeConfigTypes(root, config.config ?? {})
-  const program = checkTypes(root, [configTypes])
+  return config.framework === 'vue' && watchVueTypes ? watchVueTypes(root, configTypes) : checkTypes(root, [configTypes])
+}
+export async function typecheckProject(project='.') {
+  const {root,config}=await loadProject(project)
+  await projectProgram(root,config)
+}
+export async function buildProject(
+  project = '.',
+  options: { out?: string; overwrite?: boolean; development?: boolean } = {},
+  watchVueTypes?: (root: string, declarations: string) => ts.Program,
+  isCurrent: () => boolean = () => true,
+  componentCache?: WatchComponentCache,
+): Promise<{ path: string; bytes: number; devModules: Record<string, string> }> {
+  const { root, config } = await loadProject(project)
+  const program = await projectProgram(root,config,watchVueTypes)
   const checker = program.getTypeChecker()
   const chunks = new Map<string, string>()
   const chunkNames = new Map<string, string>()
@@ -277,9 +320,9 @@ export async function buildProject(
   }
   const devModules: Record<string, string> = {}
   const surfaceEntries = new Set(
-    (config.manifest.modules.surfaces ?? [])
+    (config.manifest.entry.views ?? [])
       .filter((surface) => surface.kind === 'web')
-      .map((surface) => surface.entry),
+      .map((surface) => surface.module),
   )
   const plugins = [hostModulesPlugin(), vuePlugin(root, config.framework), stylesheetPlugin()]
   const defines = {
@@ -290,6 +333,13 @@ export async function buildProject(
   }
   for (const [id, file] of Object.entries(config.entries)) {
     const entry = await inside(root, file)
+    const nodeServer = config.manifest.entry.server?.runtime === 'node' && config.manifest.entry.server.module === id
+    if (config.manifest.entry.views?.some(view => view.kind === 'component' && view.module === id)) {
+      const factory = await buildComponent(root,entry,uniqueEntryName(id,'Surface'),defines,componentCache)
+      chunks.set(id,factory)
+      if(options.development) devModules[id]='export default '+factory
+      continue
+    }
     const sourceFile = program.getSourceFile(entry)
     const moduleSymbol = sourceFile && checker.getSymbolAtLocation(sourceFile)
     const defaultExport =
@@ -305,14 +355,14 @@ export async function buildProject(
     ) {
       throw new Error('Entry must be included in tsconfig and default-export a function: ' + file)
     }
-    const result = await build({
+    const buildEntry = (optional = new Set<string>()) => build({
       absWorkingDir: root,
       entryPoints: [entry],
       bundle: true,
       write: false,
       format: 'iife',
       globalName: '__ceru_entry',
-      platform: 'browser',
+      platform: config.manifest.entry.server?.runtime === 'node' && config.manifest.entry.server.module === id ? 'node' : 'browser',
       target: 'es2022',
       charset: 'utf8',
       minify: false,
@@ -323,7 +373,17 @@ export async function buildProject(
       tsconfig: resolve(root, 'tsconfig.json'),
       outfile: 'entry.js',
       legalComments: 'inline',
-      plugins,
+      plugins: [...plugins, {
+        name: 'ceru-optional-node-dependencies',
+        setup(builder) {
+          builder.onResolve({ filter: /.*/ }, args => optional.has(args.path)
+            ? { path: args.path, namespace: 'ceru-missing-optional' } : undefined)
+          builder.onLoad({ filter: /.*/, namespace: 'ceru-missing-optional' }, args => ({
+            contents: 'const error = new Error(' + JSON.stringify('Cannot find module ' + args.path) + '); error.code = "MODULE_NOT_FOUND"; throw error;',
+            loader: 'js',
+          }))
+        },
+      }],
       define: defines,
       loader: {
         '.svg': 'dataurl',
@@ -335,17 +395,29 @@ export async function buildProject(
         '.woff2': 'dataurl',
       },
     })
+    let result = await buildEntry()
+    // esbuild only tolerates unresolved require() inside try/catch. Bundle a
+    // throwing module for those absent optional dependencies (e.g. Express's
+    // debug -> supports-color), preserving the catch without external files.
+    // Missing required dependencies already failed the first build.
+    if (nodeServer) {
+      const optional = new Set(Object.values(result.metafile.outputs).flatMap(info =>
+        info.imports.filter(item => item.external && item.kind === 'require-call' && !isBuiltin(item.path)).map(item => item.path)))
+      if (optional.size) result = await buildEntry(optional)
+    }
     if (result.outputFiles.length !== 1) throw new Error('Entry emitted sidecar files: ' + id)
     for (const info of Object.values(result.metafile.outputs))
-      if (info.imports.length) throw new Error('Unbundled import in ' + id)
+      if (info.imports.some(item => !(config.manifest.entry.server?.runtime === 'node' && config.manifest.entry.server.module === id && item.external && isBuiltin(item.path))))
+        throw new Error('Unbundled import in ' + id)
     const source = result.outputFiles[0].text.replace(
       /(^|\n)var __ceru_entry =/,
       '$1const __ceru_entry =',
     )
-    assertBundledDependencies(source)
+    if (!(config.manifest.entry.server?.runtime === 'node' && config.manifest.entry.server.module === id))
+      assertBundledDependencies(source)
     const entryName = uniqueEntryName(
       id,
-      id === config.manifest.modules.logic?.entry
+      id === config.manifest.entry.logic?.module
         ? 'Logic'
         : surfaceEntries.has(id)
           ? 'Surface'
@@ -353,7 +425,9 @@ export async function buildProject(
     )
     chunks.set(
       id,
-      'async function ' + entryName + '(ctx) {\n' +
+      'async function ' +
+        entryName +
+        '(ctx) {\n' +
         source +
         '\nif (typeof __ceru_entry.default !== "function") throw new Error("Entry must default-export a function");\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -365,7 +439,7 @@ export async function buildProject(
         write: false,
         format: 'iife',
         globalName: '__ceru_entry',
-        platform: 'browser',
+        platform: config.manifest.entry.server?.runtime === 'node' && config.manifest.entry.server.module === id ? 'node' : 'browser',
         target: 'es2022',
         charset: 'utf8',
         sourcemap: 'inline',
@@ -419,7 +493,9 @@ export async function buildProject(
     const entryName = uniqueEntryName(id, 'Surface')
     chunks.set(
       id,
-      'async function ' + entryName + '(ctx) {\n' +
+      'async function ' +
+        entryName +
+        '(ctx) {\n' +
         source +
         '\nreturn __ceru_entry.default(ctx);\n}',
     )
@@ -435,6 +511,9 @@ export async function buildProject(
     }
   }
   const resources: Record<string, Resource> = Object.create(null)
+  const nativeResources = new Set(
+    (config.manifest.entry.native ?? []).flatMap(item => Object.values(item.platforms)),
+  )
   for (const [id, input] of Object.entries(config.resources ?? {})) {
     if (
       !input ||
@@ -461,37 +540,34 @@ export async function buildProject(
         type: 'base64',
         value: bytes.toString('base64'),
         mime: input.mime ?? 'application/octet-stream',
+        ...(nativeResources.has(id) ? { sha256: 'sha256:' + createHash('sha256').update(bytes).digest('hex') } : {}),
       }
   }
   const emitted = new Set<string>()
   const definitions: string[] = []
   const exports: string[] = []
-  const logicEntry = config.manifest.modules.logic?.entry
+  const logicEntry = config.manifest.entry.logic?.module
   if (logicEntry) {
     const logic = chunks.get(logicEntry)
     const name = chunkNames.get(logicEntry)
     if (!logic) throw new Error('Missing compiled logic entry: ' + logicEntry)
     if (!name) throw new Error('Missing compiled logic name: ' + logicEntry)
     definitions.push(
-      '// Invisible plugin logic\nconst ' +
-        name +
-        ' = /* @ceru-self-contained */ ' +
-        logic +
-        ';',
+      '// Invisible plugin logic\nconst ' + name + ' = /* @ceru-self-contained */ ' + logic + ';',
     )
     exports.push('exports.activate = ' + name + ';')
     emitted.add(logicEntry)
   }
-  const visibleSurfaces = (config.manifest.modules.surfaces ?? []).filter(
-    (surface) => surface.kind === 'web',
+  const visibleSurfaces = (config.manifest.entry.views ?? []).filter(
+    (surface) => surface.kind === 'web' || surface.kind === 'component',
   )
   if (visibleSurfaces.length) {
     const entries = visibleSurfaces.map((surface) => {
-      const entry = chunks.get(surface.entry)
-      const name = chunkNames.get(surface.entry)
-      if (!entry) throw new Error('Missing compiled Surface entry: ' + surface.entry)
-      if (!name) throw new Error('Missing compiled Surface name: ' + surface.entry)
-      emitted.add(surface.entry)
+      const entry = chunks.get(surface.module)
+      const name = chunkNames.get(surface.module)
+      if (!entry) throw new Error('Missing compiled Surface entry: ' + surface.module)
+      if (!name) throw new Error('Missing compiled Surface name: ' + surface.module)
+      emitted.add(surface.module)
       definitions.push(
         '// Visible plugin surface: ' +
           surface.id +
@@ -544,12 +620,13 @@ export async function buildProject(
   const rel = relative(root, output)
   if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel))
     throw new Error('Build output must stay inside project')
-  await writeAtomic(output, artifact, options.overwrite ?? true)
+  if (isCurrent()) await writeAtomic(output, artifact, options.overwrite ?? true)
   return { path: output, bytes: artifact.length, devModules }
 }
 export const TEMPLATES = [
   'source',
   'connected-library',
+  'account-qrcode',
   'importer',
   'guest-adapter',
   'web-surface',
@@ -557,12 +634,21 @@ export const TEMPLATES = [
   'vue-tsx',
   'react',
   'web-dist',
+  'page-extension',
+  'playback-hook',
+  'player-skin',
+  'encrypted-source',
 ] as const
 export type TemplateName = (typeof TEMPLATES)[number]
 // 与根 README 的模板表保持一致；Record 保证新增模板必须补说明。
 export const TEMPLATE_INFO: Record<TemplateName, string> = {
+  'player-skin': 'Vue 歌词、封面与背景区域',
   source: '本地搜索 demo、标准 Provider、结构化解析结果',
+  'encrypted-source': '内置解密、WASM 变换和本机服务三个音源',
+  'playback-hook': '拦截点播和队列，内置无桌面测试',
+  'page-extension':'Vue 侧边栏、设置页及歌单按钮',
   'connected-library': '连接表单与状态更新 demo',
+  'account-qrcode': '扫码登录：宿主模板或插件自定义内部 UI',
   importer: '曲目去重与导入计划预览',
   'guest-adapter': '父插件与 Guest bootstrap 的边界',
   'web-surface': '普通 DOM 页面',
@@ -586,11 +672,14 @@ export async function scaffoldProject(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  const slug =
-    basename(root)
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, '-')
-      .replace(/^-+|-+$/g, '') || 'my-plugin'
+  const directoryName = basename(root).normalize('NFC')
+  const lowerName = directoryName.toLowerCase()
+  const stem = lowerName.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-plugin'
+  const maxSlugLength = 128 - 'local.'.length
+  const suffix = createHash('sha256').update(directoryName).digest('hex').slice(0,12)
+  const slug = stem === lowerName && stem.length <= maxSlugLength ? stem :
+    stem.slice(0,maxSlugLength - suffix.length - 1).replace(/-+$/,'') + '-' + suffix
+  const displayName = Array.from(directoryName.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0,120).join('') || slug
   const base = fileURLToPath(new URL('../templates/', import.meta.url))
   const snapshot = JSON.parse(await readFile(resolve(base, 'snapshot.json'), 'utf8'))
   const prefix = template + '/' + language + '/'
@@ -606,20 +695,20 @@ export async function scaffoldProject(
     if (name === 'package.json') {
       const pkg = JSON.parse(bytes.toString('utf8'))
       pkg.name = slug
+      pkg.scripts = { ...pkg.scripts, 'check:compat': 'ceru-plugin check-compat' }
       contents = JSON.stringify(pkg, null, 2) + '\n'
     }
     if (name === 'ceru.plugin.json') {
       const cfg = JSON.parse(bytes.toString('utf8'))
       const old = cfg.manifest.name
       cfg.manifest.id = 'local.' + slug
-      cfg.manifest.name = slug
-      for (const provider of cfg.manifest.contributes?.providers ?? [])
-        if (provider.name === old) provider.name = slug
-      for (const item of cfg.manifest.contributes?.sidebarItems ?? [])
-        if (item.title === old) item.title = slug
+      cfg.manifest.name = displayName
+      for (const provider of cfg.manifest.provides?.providers ?? [])
+        if (provider.name === old) provider.name = displayName
+      for (const item of cfg.manifest.ui?.pages ?? []) if (item.title === old) item.title = displayName
       contents = JSON.stringify(cfg, null, 2) + '\n'
     }
-    if (name === 'README.md') contents = bytes.toString('utf8').replace(/^# .*/, '# ' + slug)
+    if (name === 'README.md') contents = bytes.toString('utf8').replace(/^# .*/, () => '# ' + displayName)
     await writeAtomic(resolve(root, name), contents)
   }
   return realpath(root)

@@ -1,0 +1,44 @@
+{
+  "page": {
+    "items": [
+      {
+        "ref": {
+          "pluginId": "example.early-source",
+          "providerId": "early",
+          "kind": "track",
+          "id": "one"
+        },
+        "title": "第一首歌",
+        "capabilities": [
+          "play"
+        ],
+        "metadata": {
+          "artists": [
+            "歌手"
+          ]
+        }
+      }
+    ]
+  },
+  "resolve": {
+    "ok": true,
+    "url": "https://example.invalid/one.mp3"
+  },
+  "lyrics": {
+    "version": 1,
+    "track": {
+      "pluginId": "example.early-source",
+      "providerId": "early",
+      "kind": "track",
+      "id": "one"
+    },
+    "offsetMs": 0,
+    "lines": [
+      {
+        "startTimeMs": 0,
+        "text": "第一行"
+      }
+    ],
+    "format": "crlyric"
+  }
+}
