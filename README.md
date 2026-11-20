@@ -2,7 +2,7 @@
 
 新工程提供 `npm run check:compat`，可在构建前检查目标宿主的 API、组件库版本与播放器区域契约。检查范围与 `--host` 用法见[兼容性检查](docs/COMPATIBILITY.md)。
 
-**本地 v3 候选开发包（尚未发布）**：不要用 npm 的 latest 验收本分支。维护者在工具链运行 `npm run build`、`npm run pack:all`、`npm run pack:devkit`。将生成的目录交给开发者，照目录内 README 在一个空目录创建独立项目，不需要全局 CLI 或工作区软链接。首次安装第三方依赖需要可用的 npm 缓存或网络。
+**v3.0.0 工具链已发布**：使用 `npx create-ceru-plugin@3.0.0` 创建工程。v3 插件需要支持 v3 的 2.5.0 宿主；桌面软件正式 Release 按用户要求暂缓，当前使用本地测试版。旧版宿主的作者可用 `npx create-ceru-plugin@0.3.16` 或 `@legacy-v2`。离线作者套件见 [v3.0.0 Release](https://github.com/CeruMusic/CeruMusic-Plugin-Cli/releases/tag/v3.0.0)，源码构建和本地验收记录仍保留。
 
 要做播放规则，选择 `--template playback-hook --lang ts`（也支持 js），安装后运行 `npm test`。可编辑 `tests/hooks.json` 新增场景。每个场景会在新 worker 中用真实 v3 契约执行，失败会报告场景名；不连接实际播放器。`npm run dev` 用于在桌面开发模式中复验。 详见[播放与队列拦截指南](docs/OPERATIONS.md)。
 
@@ -10,7 +10,7 @@
 
 这是 v3 协议的本地开发工具链。旧插件仍由冻结的 v2 环境运行，v3 的安装包容器版本仍为 2。
 
-v3 尚未发布。联调请在本地工具链仓库运行 `npm ci`、`npm run build`、`npm run pack:all`。不要从 npm 的 `latest` 安装来验证此候选版本；本地包安装验收见 `docs/v3-local-qa.md`。
+v3.0.0 与冻结 v2 维护版 0.3.16 均已发布，npm 官方标签分别为 `latest` 和 `legacy-v2`。源码联调运行 `npm ci`、`npm run build`、`npm run pack:all`；历史本地验收见 `docs/v3-local-qa.md`。
 
 v2 项目可使用冻结的 CLI `0.3.16`，或按 [v3 清单与迁移指南](docs/MANIFEST-V3.md) 在副本中执行 `ceru-plugin migrate`。
 

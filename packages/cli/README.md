@@ -2,7 +2,7 @@
 
 v3 新增 `ceru-plugin check-compat`（新工程也可 `npm run check:compat`），检查宿主 API、组件库范围与区域版本。可用 `--host profile.json` 指定目标宿主；未指定时仅与工具包参考版本比较。命令支持 `--json`，冲突返回非零退出码。它不代替类型检查或实际桌面验收，详见 [兼容性检查](../../docs/COMPATIBILITY.md)。
 
-**本地 v3 候选开发包（尚未发布）**：不要用 npm 的 latest 验收本分支。维护者在工具链运行 `npm run build`、`npm run pack:all`、`npm run pack:devkit`。将生成的目录交给开发者，照目录内 README 在一个空目录创建独立项目，不需要全局 CLI 或工作区软链接。首次安装第三方依赖需要可用的 npm 缓存或网络。
+**v3.0.0 工具链已发布**：使用 `npx create-ceru-plugin@3.0.0` 创建工程。v3 插件需要支持 v3 的 2.5.0 宿主；桌面软件正式 Release 按用户要求暂缓，当前使用本地测试版。旧版宿主的作者可用 `npx create-ceru-plugin@0.3.16` 或 `@legacy-v2`。离线作者套件见 [v3.0.0 Release](https://github.com/CeruMusic/CeruMusic-Plugin-Cli/releases/tag/v3.0.0)，源码构建和本地验收记录仍保留。
 
 要做播放规则，选择 `--template playback-hook --lang ts`（也支持 js），安装后运行 `npm test`。可编辑 `tests/hooks.json` 新增场景。每个场景会在新 worker 中用真实 v3 契约执行，失败会报告场景名；不连接实际播放器。`npm run dev` 用于在桌面开发模式中复验。
 

@@ -4,7 +4,7 @@
 
 ## 双版本发布边界
 
-当前 `0.3.16` 与 `3.0.0` 的联调只使用本地 tarball。工作流已按版本选择 npm 标签：`0.x` 正式版使用 `legacy-v2`，预发布版本使用 `next`，其他正式版使用 `latest`。将来 v2 补丁应从 `release/v2` 发布；只有 `legacy-v2` 标签真正发布后才可用 `npm i @shiqianjiang/ceru-plugin-core@legacy-v2`。工作流改动仍须在正式发布前复核，本地验收不代表允许发布。
+`0.3.16` 与 `3.0.0` 已于 2026-11-21 发布并逐项核对 npm 官方版本及标签。`0.x` 正式版使用 `legacy-v2`，预发布使用 `next`，v3 正式版使用 `latest`。v2 补丁从 `release/v2` 发布，可用 `npm i @shiqianjiang/ceru-plugin-core@legacy-v2` 安装。桌面 2.5.0 Release 按用户最新要求暂缓，等待后续修改和再次确认。
 
 ## 认证：Trusted Publishing（无 token）
 
