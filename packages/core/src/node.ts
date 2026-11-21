@@ -121,6 +121,15 @@ export class NodePluginSandbox {
             void this.rpc(String(data.method), data.data)
               .then(
                 (value) => {
+                  if (data.method === 'http.request' && value?.body instanceof ArrayBuffer) {
+                    if (this.worker !== worker) return
+                    const { body, ...metadata } = value
+                    worker.postMessage({
+                      generation: this.generation, type: 'rpc-binary-result',
+                      data: { id: data.id, value: metadata, buffer: body }
+                    }, [body])
+                    return
+                  }
                   if (data.method === 'server.start' && Number.isInteger(value?.port)) {
                     if (this.worker !== worker) {
                       void this.rpc('server.stop', { port: value.port }).catch(() => {})

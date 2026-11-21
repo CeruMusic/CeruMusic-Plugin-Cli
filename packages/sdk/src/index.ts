@@ -319,7 +319,8 @@ export interface PluginContext extends HostServices {
   http: {
     /** Axios-backed Host client with JSON/form helpers and typed results. */
     create(options: HttpClientOptions): ReturnType<typeof createHttpClient>
-    request(request: {
+    request<Mode extends 'arraybuffer' | undefined = undefined>(request: {
+      responseType?: Mode
       permissionKey: string
       url: string
       method?: string
@@ -328,7 +329,7 @@ export interface PluginContext extends HostServices {
       timeoutMs?: number
       credential?: CredentialRef
       operation: OperationContext
-    }): Promise<{ status: number; headers: Record<string, string>; body: JsonValue }>
+    }): Promise<{ status: number; headers: Record<string, string>; body: Mode extends 'arraybuffer' ? ArrayBuffer : JsonValue }>
   }
   credentials: { get(connectionId: string): Promise<CredentialRef | null> }
   playback: { failure(error: MusicFault): ResolveResult }

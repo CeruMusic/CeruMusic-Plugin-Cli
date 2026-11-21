@@ -31,7 +31,17 @@ parentPort!.on('message', async (message) => {
   try {
     if (message.type !== 'boot') {
       if (context && message.generation === generation) {
-        if (message.type === 'stream-cancel') {
+        if (message.type === 'rpc-binary-result') {
+          const { id, buffer, value } = message.data
+          if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > 1024 * 1024)
+            throw Error('Invalid HTTP response buffer')
+          const key = 'http-result:' + id
+          Object.setPrototypeOf(buffer, realmArrayBufferPrototype)
+          streamInputs.set(key, buffer)
+          try {
+            deliver({ generation, type: 'rpc-result', data: { id, value, binaryKey: key } })
+          } finally { streamInputs.delete(key) }
+        } else if (message.type === 'stream-cancel') {
           streamInputs.delete(message.data.id)
           streamReplies.delete(message.data.id)
         } else if (message.type === 'http-request-chunk') {

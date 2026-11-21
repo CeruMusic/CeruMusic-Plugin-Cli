@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-core",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Ceru Music v3 plugin Core runtime and Host adapter boundary",
   "type": "module",
   "main": "./dist/index.js",
@@ -89,8 +89,8 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@shiqianjiang/ceru-plugin-issuer": "3.0.0",
-    "@shiqianjiang/ceru-plugin-sdk": "3.0.0",
+    "@shiqianjiang/ceru-plugin-issuer": "3.0.1",
+    "@shiqianjiang/ceru-plugin-sdk": "3.0.1",
     "axios": "^1.13.2",
     "semver": "^7.7.0",
     "socket.io-client": "^4.8.3",

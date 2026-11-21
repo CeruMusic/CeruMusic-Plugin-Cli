@@ -5,6 +5,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '仅发布 sdk、issuer、core 的版本号'
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -15,6 +21,8 @@ jobs:
     permissions:
       contents: write # gh release create
       id-token: write # npm Trusted Publishing 的 OIDC 令牌
+    env:
+      RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,7 +34,7 @@ jobs:
           node-version: 22
       # Trusted Publishing 要求 npm >= 11.5.1 且 Node >= 22.14；发布构建不使用依赖缓存
       - run: npm install -g npm@^11.5.1
-      - run: node scripts/check-release-version.mjs
+      - run: node scripts/check-release-version.mjs "$RELEASE_VERSION"
       - run: npm ci
       - run: npm test
       # pack:all 会重新校验产物里没有密钥/测试工程，产出的 tgz 同时作为 Release 附件
@@ -34,13 +42,15 @@ jobs:
       - name: Publish to npm
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_VERSION#v}"
           # 冻结 v2 的维护版本不能覆盖 v3 的 latest 安装入口。
           npm_tag=latest
           if [[ "$version" == 0.* ]]; then npm_tag=legacy-v2; fi
           if [[ "$version" == *-* ]]; then npm_tag=next; fi
           # 内部依赖是精确版本，必须按依赖顺序发布：sdk ← issuer ← core ← cli ← create
-          for directory in sdk issuer core cli create; do
+          directories=(sdk issuer core)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then directories+=(cli create); fi
+          for directory in "${directories[@]}"; do
             name=$(node -p "require('./packages/${directory}/package.json').name")
             # 重跑时跳过 registry 上已存在的版本，只补发剩余的包与 Release
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
@@ -52,6 +62,7 @@ jobs:
             echo "::endgroup::"
           done
       - name: Create GitHub release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

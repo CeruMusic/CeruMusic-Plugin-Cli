@@ -51,6 +51,8 @@ export async function requestNetwork(
   signal?: AbortSignal,
   redirects = 0,
 ): Promise<any> {
+  const binary = input.responseType === 'arraybuffer'
+  if (input.responseType !== undefined && !binary) throw Error('Unsupported HTTP responseType')
   const url = new URL(input.url)
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
     throw new Error('只支持 HTTP/HTTPS 请求')
@@ -85,7 +87,7 @@ export async function requestNetwork(
       proxy: false,
       maxRedirects: 0,
       timeout: Math.min(60000, Math.max(1000, input.timeoutMs || 30000)),
-      maxContentLength: 16 * 1024 * 1024,
+      maxContentLength: (binary ? 1 : 16) * 1024 * 1024,
       maxBodyLength: 4 * 1024 * 1024,
       responseType: 'arraybuffer',
       validateStatus: () => true,
@@ -116,11 +118,14 @@ export async function requestNetwork(
         redirects + 1,
       )
     }
-    const raw = Buffer.from(response.data).toString('utf8')
-    let body: any = raw
-    try {
-      body = JSON.parse(raw)
-    } catch {}
+    let body: any
+    if (binary) {
+      // Own an exact-sized backing store before transferring it to the worker.
+      body = Uint8Array.from(response.data as Uint8Array).buffer
+    } else {
+      body = Buffer.from(response.data).toString('utf8')
+      try { body = JSON.parse(body) } catch {}
+    }
     return {
       status: response.status,
       headers: Object.fromEntries(

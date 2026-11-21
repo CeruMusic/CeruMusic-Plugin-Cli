@@ -1,6 +1,6 @@
 {
   "name": "@shiqianjiang/ceru-plugin-sdk",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Typed authoring contracts for Ceru Music v2 single-file plugins",
   "type": "module",
   "main": "./dist/index.js",

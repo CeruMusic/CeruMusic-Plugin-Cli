@@ -970,6 +970,7 @@ window.addEventListener('message', async (event) => {
     if (item) {
       clearTimeout(item.timer)
       pending.delete(message.data.id)
+      if (message.data.binaryKey) message.data.value.body = binary.take(message.data.binaryKey).buffer
       message.data.error
         ? item.reject(new Error(message.data.error))
         : item.resolve(message.data.value)

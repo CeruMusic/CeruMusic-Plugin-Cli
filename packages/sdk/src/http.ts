@@ -7,6 +7,7 @@ export interface HttpResponse<T> {
   data: T
 }
 export interface HttpRequestOptions {
+  responseType?: 'arraybuffer'
   operation: OperationContext
   permissionKey?: string
   query?: Record<string, QueryValue | QueryValue[]>
@@ -128,6 +129,7 @@ export function createHttpClient(
       headers,
       body,
       credential: input.credential,
+      ...(input.responseType ? { responseType: input.responseType } : {}),
       timeoutMs: input.timeoutMs,
       operation: input.operation,
     })
